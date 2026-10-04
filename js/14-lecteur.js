@@ -1,0 +1,732 @@
+/* 14-lecteur.js
+ *
+ * Le lecteur video: pistes, sous-titres, controles, generique, suivant.
+ *
+ * Charge par index.html, dans l'ordre. Script classique et non module:
+ * une page ouverte en file:// ne peut pas charger de module — le navigateur
+ * y voit une requete inter-origines et la refuse. Tous ces fichiers
+ * partagent donc la meme portee globale, exactement comme quand ils ne
+ * faisaient qu'un. L'ordre compte: il est celui de la liste dans la page.
+ */
+"use strict";
+/* ====================================================== lecteur ====== */
+const V = $('#vid'), P = $('#player'), A = $('#altAud');
+
+/* ------------------------------------------- langues et sous-titres --
+   Chrome n'expose pas les pistes audio d'un MP4: on ne peut pas y changer de
+   langue. La video garde donc sa piste d'origine — la VO — et toute autre
+   langue arrive dans un fichier a cote, joue par un <audio> qu'on recale sur
+   l'image. Les sous-titres, eux, sont de vrais <track> en .vtt. */
+const NOM_LANGUE = { fr:'Français', en:'Anglais', de:'Allemand', es:'Espagnol',
+                     it:'Italien', ja:'Japonais', pt:'Portugais', nl:'Néerlandais',
+                     ru:'Russe', ar:'Arabe', ko:'Coréen', zh:'Chinois',
+                     pl:'Polonais', id:'Indonésien', ms:'Malais', th:'Thaï',
+                     vi:'Vietnamien', tr:'Turc', hi:'Hindi', he:'Hébreu',
+                     sv:'Suédois', da:'Danois', fi:'Finnois', no:'Norvégien',
+                     cs:'Tchèque', hu:'Hongrois', ro:'Roumain', el:'Grec',
+                     uk:'Ukrainien' };
+function nomLangue(code, rang){
+  const c = String(code || '').toLowerCase();
+  const n = NOM_LANGUE[c.slice(0,2)] || (c ? c.toUpperCase() : 'Piste');
+  return rang > 1 ? n + ' (' + rang + ')' : n;
+}
+/** Deuxieme piste de meme langue: « Français (2) » plutot que deux « Français ». */
+function numeroter(liste){
+  const vus = {};
+  return liste.map(c => {
+    const b = String(c.lang).slice(0,2);
+    vus[b] = (vus[b] || 0) + 1;
+    return { c, label: nomLangue(c.lang, vus[b]) };
+  });
+}
+
+let altRevoke = null, altLang = null, altT = null, subUrls = [];
+/** L'element qui porte reellement le son: la piste a cote si elle joue. */
+function sortie(){ return altLang ? A : V; }
+
+function altStop(){
+  if (altT){ clearInterval(altT); altT = null; }
+  try { A.pause(); } catch(e){}
+  A.removeAttribute('src');
+  try { A.load(); } catch(e){}
+  if (altRevoke){ try { altRevoke(); } catch(e){} altRevoke = null; }
+  altLang = null;
+  V.muted = false;
+}
+/** Recale la piste sur l'image. Au-dela d'un quart de seconde, on l'entend. */
+function altCaler(force){
+  if (!altLang || !A.src) return;
+  if (force || Math.abs(A.currentTime - V.currentTime) > 0.25){
+    try { A.currentTime = V.currentTime; } catch(e){}
+  }
+}
+async function altChoisir(cote){
+  const vol = sortie().volume, muet = sortie().muted;
+  altStop();
+  if (cote){
+    const s = await srcOf(cote);
+    if (!s) return toast('Piste audio introuvable', 'bad');
+    altRevoke = s.revoke; altLang = cote.lang;
+    A.src = s.url; A.load();
+    A.playbackRate = V.playbackRate;
+    V.muted = true;                       // la video ne fournit plus que l'image
+    altCaler(true);
+    if (!V.paused) A.play().catch(() => {});
+    altT = setInterval(() => altCaler(false), 1000);
+  }
+  sortie().volume = vol;
+  sortie().muted = muet;
+  paintVol();
+  $('#pAudio').classList.toggle('marque', !!altLang);
+  buildAudMenu();
+}
+V.addEventListener('play',       () => { if (altLang){ altCaler(true); A.play().catch(()=>{}); } });
+V.addEventListener('pause',      () => { if (altLang) A.pause(); });
+V.addEventListener('seeked',     () => altCaler(true));
+V.addEventListener('ratechange', () => { if (altLang) A.playbackRate = V.playbackRate; });
+V.addEventListener('waiting',    () => { if (altLang) A.pause(); });
+V.addEventListener('playing',    () => { if (altLang){ altCaler(true); A.play().catch(()=>{}); } });
+
+function buildAudMenu(){
+  const e = S.current;
+  const pistes = numeroter((e && e.auds) || []);
+  $('#audMenu').innerHTML =
+    '<h4>Langue</h4>' +
+    '<button data-aud="-1"' + (altLang ? '' : ' class="on"') + '>Version originale</button>' +
+    pistes.map((p,i) => '<button data-aud="' + i + '"' +
+      (altLang === p.c.lang ? ' class="on"' : '') + '>' + esc(p.label) + '</button>').join('');
+  $$('[data-aud]', $('#audMenu')).forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.aud;
+    altChoisir(i < 0 ? null : pistes[i].c);
+  }));
+}
+function buildSubMenu(){
+  const pistes = [...V.textTracks];
+  const actif = pistes.findIndex(t => t.mode === 'showing');
+  $('#subMenu').innerHTML =
+    '<h4>Sous-titres</h4>' +
+    '<button data-sub="-1"' + (actif < 0 ? ' class="on"' : '') + '>Aucun</button>' +
+    pistes.map((t,i) => '<button data-sub="' + i + '"' +
+      (i === actif ? ' class="on"' : '') + '>' + esc(t.label || nomLangue(t.language)) +
+      '</button>').join('');
+  $$('[data-sub]', $('#subMenu')).forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.sub;
+    stVoulue = i < 0 ? '' : (pistes[i].language || '');
+    pistes.forEach((t,k) => { t.mode = k === i ? 'showing' : 'disabled'; });
+    store.set('sublang', stVoulue);
+    $('#pSubs').classList.toggle('marque', i >= 0);
+    buildSubMenu();
+  }));
+}
+/* La langue de sous-titres a afficher pour l'episode en cours. */
+let stVoulue = '';
+/**
+ * Regle l'etat de TOUTES les pistes, pas seulement celle qu'on veut.
+ *
+ * Chrome active de lui-meme la premiere piste ajoutee a la video. Ne faire
+ * qu'allumer la langue retenue laissait donc deux sous-titres a l'ecran — la
+ * premiere piste, l'arabe par ordre alphabetique, et le francais — et sans
+ * langue retenue, l'arabe seul. Chrome pouvant repasser apres nous, on
+ * reapplique aussi quand la video charge et quand elle demarre.
+ */
+function appliquerSousTitres(){
+  const pistes = [...V.textTracks];
+  const i = stVoulue ? pistes.findIndex(t => t.language === stVoulue) : -1;
+  pistes.forEach((t,k) => {
+    const m = k === i ? 'showing' : 'disabled';
+    if (t.mode !== m) t.mode = m;
+  });
+  $('#pSubs').classList.toggle('marque', i >= 0);
+}
+/** Les <track> d'un episode, avec la langue retenue la derniere fois. */
+async function poserSousTitres(ep){
+  $$('track', V).forEach(t => t.remove());
+  subUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(e){} });
+  subUrls = [];
+  /* Rien de retenu dans le navigateur (null): le francais. Une chaine vide,
+     elle, veut dire qu'on a choisi « Aucun », et on la respecte.
+     Quand il y a plusieurs pistes francaises, la plus lourde: l'autre ne porte
+     que les passages forces (quelques lignes). Selon les episodes de Game of
+     Thrones, la complete s'appelle « fr » ou « fr2 », d'ou la taille plutot
+     que le nom. */
+  const retenue = store.get('sublang', null);
+  let francais = '', poids = -1, nb = 0;
+  stVoulue = retenue !== null ? retenue : '';
+  for (const { c, label } of numeroter(ep.subs || [])){
+    /* Un .vtt sert par le reseau (bibliotheque partagee) se lit a
+       son adresse: meme origine que la page, <track> l'accepte sans
+       CORS. fileOf() n'ouvre que des fichiers locaux — sans ce
+       detour, aucune piste n'arrivait en partage, et le bouton
+       sous-titres restait eteint pour les series dont la video
+       n'embarque pas de piste. */
+    let url, taille = c.size || 0;
+    if (c.ref && c.ref.kind === 'url'){
+      url = c.ref.url;
+    } else {
+      const f = await fileOf(c);
+      if (!f) continue;
+      url = URL.createObjectURL(f);
+      subUrls.push(url);
+      taille = f.size;
+    }
+    if (/^fr/i.test(c.lang) && taille > poids){ francais = c.lang; poids = taille; }
+    const t = document.createElement('track');
+    t.kind = 'subtitles'; t.label = label; t.srclang = c.lang; t.src = url;
+    V.appendChild(t);
+    nb++;
+  }
+  if (retenue === null) stVoulue = francais;
+  $('#pSubs').hidden = !nb;
+  appliquerSousTitres();
+}
+/* Chrome reprend la main apres nous — a l'ajout des pistes, puis de nouveau au
+   V.load() qui suit — et rallume la premiere. Plutot que de deviner quand,
+   on le laisse faire et on corrige a chaque changement. Le menu met stVoulue
+   a jour avant de toucher aux pistes: son choix, lui, n'est pas annule. */
+V.textTracks.addEventListener('change', appliquerSousTitres);
+V.textTracks.addEventListener('addtrack', () => setTimeout(appliquerSousTitres, 0));
+let hideT, saveT, nextT, nextCount = 0;
+
+async function openPlayer(ep){
+  const a = S.byKey.get(ep.anime);
+  S.current = ep;
+  S.queue = a ? a.episodes : [ep];
+  P.hidden = false;
+  document.body.style.overflow = 'hidden';
+  $('#pErr').hidden = true;
+  $('#pTitle').textContent = (a ? a.title : ep.anime);
+  $('#pSub').textContent = [seasonLabel(ep.seasonKey), ep.title, fmtSize(ep.size)].filter(Boolean).join(' · ');
+  hideNext();
+  hideSkip();
+  segInside = { intro:false, fin:false };
+  MENUS.forEach(k => { $(k).hidden = true; });
+  showCenter(false);
+
+  cleanupSource();
+  altStop();
+  $('#pAudio').hidden = !(ep.auds && ep.auds.length);
+  $('#pAudio').classList.remove('marque');
+  await poserSousTitres(ep);
+  const src = await srcOf(ep);
+  if (!src) return playerError('Fichier introuvable', 'Le fichier a peut-être été déplacé. Relance un scan du dossier.');
+  S.srcUrl = src.url;
+  S.srcRevoke = src.revoke;
+
+  if (ep.play === 'ts'){ await playTS(src.url, ep); }
+  else {
+    const direct = urlDirecte(ep);
+    S.replier = direct ? src.url : null;
+    if (direct) S.srcUrl = direct;
+    V.src = direct || src.url;
+    V.load();
+  }
+  S.switching = false;
+
+  const p = getProgress(ep);
+  const seekTo = p && !p.done && p.t > 20 ? p.t : 0;
+  const start = () => {
+    if (S.current !== ep) return;                 // un autre épisode a été lancé entre-temps
+    if (seekTo) { try { V.currentTime = seekTo; } catch(e){} }
+    V.play().catch(() => showCenter(true));
+  };
+  if (V.readyState >= 1) start();
+  else V.addEventListener('loadedmetadata', start, { once:true });
+
+  V.volume = store.get('vol', 1);
+  A.volume = V.volume;
+  V.playbackRate = store.get('rate', 1);
+  $('#pRate').textContent = (V.playbackRate + '').replace('.',',') + '×';
+  $('#pVol').value = V.volume;
+  paintVol();
+  poke();
+}
+
+function cleanupSource(){
+  altStop();
+  dropPeek();
+  S.switching = true;                 // évite un faux « lecture impossible » pendant le changement
+  if (S.tsPlayer){ try { S.tsPlayer.destroy(); } catch(e){} S.tsPlayer = null; }
+  try { V.pause(); } catch(e){}
+  V.removeAttribute('src');
+  try { V.load(); } catch(e){}
+  if (S.srcRevoke){ try { S.srcRevoke(); } catch(e){} S.srcRevoke = null; }
+  S.srcUrl = null; S.replier = null;
+  P.classList.remove('jouant');
+}
+
+function closePlayer(){
+  saveNow();
+  flushProgress();
+  cleanupSource();
+  P.hidden = true;
+  document.body.style.overflow = '';
+  clearTimeout(nextT);
+  if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+  render();
+}
+
+/* ---- lecture des .ts via mpegts.js (chargé seulement si nécessaire) - */
+const TS_SRC = [
+  'assets/mpegts.js',
+  'https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.js',
+  'https://unpkg.com/mpegts.js@1.8.0/dist/mpegts.js'
+];
+function loadScript(src){
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = () => res(true); s.onerror = () => rej(new Error(src));
+    document.head.appendChild(s);
+  });
+}
+async function ensureTS(){
+  if (S.tsReady !== null) return S.tsReady;
+  for (const src of TS_SRC){
+    try {
+      await loadScript(src);
+      if (window.mpegts && window.mpegts.isSupported()){ S.tsReady = true; return true; }
+    } catch(e){ /* source suivante */ }
+  }
+  S.tsReady = false;
+  return false;
+}
+async function playTS(url, ep){
+  $('#pErr').hidden = false;
+  $('#pErrBox').innerHTML = '<div class="spinner"></div><h3>Préparation du flux MPEG-TS…</h3>' +
+    '<p>Les fichiers .ts ne sont pas lus nativement par le navigateur : on charge le décodeur.</p>';
+  const ok = await ensureTS();
+  if (!ok) return tsFallback(ep);
+  if (S.current !== ep) return;
+  try {
+    const player = window.mpegts.createPlayer(
+      { type:'mpegts', isLive:false, url },
+      { enableWorker:false, lazyLoad:false, autoCleanupSourceBuffer:true, fixAudioTimestampGap:true }
+    );
+    S.tsPlayer = player;
+    player.on(window.mpegts.Events.ERROR, () => tsFallback(ep));
+    player.attachMediaElement(V);
+    player.load();
+    $('#pErr').hidden = true;
+  } catch(e){
+    tsFallback(ep);
+  }
+}
+function tsFallback(ep){
+  const name = ep.rel.split('/').pop();
+  const cmd = 'ffmpeg -i "' + ep.rel + '" -c copy "' + baseOf(name) + '.mp4"';
+  $('#pErr').hidden = false;
+  $('#pErrBox').innerHTML =
+    '<h3>Ce .ts ne peut pas être lu ici</h3>' +
+    '<p>Le MPEG-TS n\'est pas décodé nativement par les navigateurs, et le décodeur d\'appoint n\'a pas pu être chargé (pas de connexion ?).<br>' +
+    'Convertis-le en .mp4 — c\'est une simple recopie, sans perte de qualité ni ré-encodage :</p>' +
+    '<div class="cmd"><code>' + esc(cmd) + '</code><button class="btn btn-ghost" id="cpCmd">Copier</button></div>' +
+    '<p style="font-size:.85rem">Il se lit aussi tel quel dans VLC ou MPV.</p>' +
+    '<button class="btn btn-ghost" id="errBack">Retour</button>';
+  const cp = $('#cpCmd');
+  cp && cp.addEventListener('click', () => {
+    navigator.clipboard.writeText(cmd).then(() => toast('Commande copiée', 'ok'), () => toast('Copie impossible', 'bad'));
+  });
+  const bk = $('#errBack');
+  bk && bk.addEventListener('click', closePlayer);
+}
+function playerError(title, msg){
+  $('#pErr').hidden = false;
+  $('#pErrBox').innerHTML = '<h3>' + esc(title) + '</h3><p>' + esc(msg) + '</p>' +
+    '<button class="btn btn-ghost" id="errBack">Retour</button>';
+  $('#errBack').addEventListener('click', closePlayer);
+}
+
+/* --------------------------------------------------- contrôles ------ */
+const ICON_PLAY  = '<svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor"><path d="m6 4 14 8-14 8z"/></svg>';
+const ICON_PAUSE = '<svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
+const ICON_BIG   = '<svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor"><path d="m6 4 14 8-14 8z"/></svg>';
+const ICON_VOL   = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 8.5a4.5 4.5 0 0 1 0 7"/></svg>';
+const ICON_MUTE  = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="m17 9 5 6m0-6-5 6"/></svg>';
+$('#pBig').innerHTML = ICON_BIG;
+$('#pPlay').innerHTML = ICON_PLAY;
+
+function showCenter(on){ $('#pBig').classList.toggle('show', !!on); }
+function poke(){
+  P.classList.remove('hide-ui');
+  clearTimeout(hideT);
+  hideT = setTimeout(() => { if (!V.paused && $('#pErr').hidden) P.classList.add('hide-ui'); }, 2800);
+}
+P.addEventListener('mousemove', poke);
+P.addEventListener('click', (ev) => {
+  if (ev.target === V || ev.target === P){ V.paused ? V.play() : V.pause(); poke(); }
+});
+P.addEventListener('dblclick', (ev) => { if (ev.target === V || ev.target === P) toggleFull(); });
+$('#pClose').addEventListener('click', closePlayer);
+$('#pPlay').addEventListener('click', () => V.paused ? V.play() : V.pause());
+$('#pBig').addEventListener('click', () => V.play());
+$('#pBack').addEventListener('click', () => skip(-10));
+$('#pFwd').addEventListener('click', () => skip(10));
+$('#pNext').addEventListener('click', () => playNext(true));
+$('#pFull').addEventListener('click', toggleFull);
+$('#pPip').addEventListener('click', () => {
+  if (document.pictureInPictureElement) document.exitPictureInPicture().catch(()=>{});
+  else V.requestPictureInPicture && V.requestPictureInPicture().catch(() => toast('Mini-lecteur indisponible', 'bad'));
+});
+/* le volume agit sur ce qui sonne: la video, ou la piste a cote quand elle
+   a pris le relais. La video reste coupee tant qu'une autre langue joue. */
+$('#pMute').addEventListener('click', () => { const o = sortie(); o.muted = !o.muted; paintVol(); });
+$('#pVol').addEventListener('input', (ev) => {
+  const o = sortie();
+  o.volume = parseFloat(ev.target.value); o.muted = o.volume === 0;
+  store.set('vol', o.volume); paintVol();
+});
+function paintVol(){
+  const o = sortie();
+  $('#pMute').innerHTML = (o.muted || o.volume === 0) ? ICON_MUTE : ICON_VOL;
+}
+
+const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
+$('#pRate').addEventListener('click', () => {
+  const i = RATES.indexOf(V.playbackRate);
+  V.playbackRate = RATES[(i + 1) % RATES.length];
+  store.set('rate', V.playbackRate);
+  $('#pRate').textContent = (V.playbackRate + '').replace('.',',') + '×';
+});
+
+function skip(d){
+  V.currentTime = Math.max(0, Math.min((V.duration || 0), V.currentTime + d));
+  const fb = $(d < 0 ? '#fbBack' : '#fbFwd');
+  fb.classList.add('on');
+  setTimeout(() => fb.classList.remove('on'), 420);
+  poke();
+}
+function toggleFull(){
+  if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+  else P.requestFullscreen().catch(() => toast('Plein écran refusé', 'bad'));
+}
+
+V.addEventListener('play',  () => { $('#pPlay').innerHTML = ICON_PAUSE; showCenter(false); P.classList.add('jouant'); poke(); });
+V.addEventListener('pause', () => {
+  $('#pPlay').innerHTML = ICON_PLAY; showCenter(true); P.classList.remove('hide-ui', 'jouant'); clearTimeout(hideT);
+  saveNow(); flushProgress();                 // moment calme: on pose la progression sur le disque
+});
+V.addEventListener('timeupdate', () => {
+  paintScrub();
+  checkSegs();
+  if (!saveT) saveT = setTimeout(() => { saveT = null; saveNow(); }, 4000);
+  const d = V.duration;
+  if (d && d - V.currentTime < 22 && d > 120) showNext();
+});
+V.addEventListener('progress', paintScrub);
+V.addEventListener('loadedmetadata', () => {
+  $('#tAll').textContent = fmtTime(V.duration);
+  paintScrub(); paintSegZones();
+});
+V.addEventListener('ended', () => { saveNow(); flushProgress(); playNext(false); });
+V.addEventListener('error', () => {
+  if (P.hidden || S.switching || !S.current) return;
+  if (S.replier){                 // l'adresse directe n'a pas pris: on reprend par le blob:
+    const u = S.replier; S.replier = null;
+    S.srcUrl = u; V.src = u; V.load();
+    return;
+  }
+  if (S.current.play === 'ts' && !S.tsPlayer) return;
+  playerError('Lecture impossible',
+    'Le navigateur n\'arrive pas à décoder « ' + S.current.name + ' ». Le codec du fichier n\'est probablement pas supporté.');
+});
+function saveNow(){
+  if (S.current && V.duration) setProgress(S.current, V.currentTime, V.duration);
+}
+
+/* --------------------------------------------------- barre de temps - */
+const scrub = $('#scrub');
+function paintScrub(){
+  const d = V.duration || 0;
+  const pct = d ? (V.currentTime / d) * 100 : 0;
+  $('#sProg').style.width = pct + '%';
+  $('#sKnob').style.left  = pct + '%';
+  $('#tNow').textContent  = fmtTime(V.currentTime);
+  let buf = 0;
+  try { if (V.buffered.length) buf = (V.buffered.end(V.buffered.length - 1) / d) * 100; } catch(e){}
+  $('#sBuf').style.width = (isFinite(buf) ? buf : 0) + '%';
+}
+function scrubAt(ev){
+  const r = scrub.getBoundingClientRect();
+  return Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+}
+/* ---------------------------------------- aperçu au survol -------- */
+/* Une seconde vidéo, muette et jamais lue, sert de décodeur: on la déplace au
+   temps survolé et on recopie l'image dans la bulle. Les .ts n'y passent pas,
+   le navigateur ne sait pas les décoder hors du lecteur. */
+let peekV = null, peekWant = null, peekBusy = false, peekFor = null;
+function peekable(){
+  return !!(S.current && S.current.play === 'native' && S.srcUrl && V.duration);
+}
+function dropPeek(){
+  if (peekV){ peekV.removeAttribute('src'); try { peekV.load(); } catch(e){} }
+  peekV = null; peekFor = null; peekWant = null; peekBusy = false;
+}
+function peekVideo(){
+  if (peekV && peekFor === S.srcUrl) return peekV;
+  dropPeek();
+  peekV = document.createElement('video');
+  peekV.muted = true; peekV.playsInline = true; peekV.preload = 'auto';
+  peekFor = S.srcUrl;
+  peekV.src = S.srcUrl;
+  return peekV;
+}
+function pumpPeek(){
+  if (peekBusy || peekWant == null || !peekable()) return;
+  const t = peekWant;                    // relevé avant peekVideo(), qui peut tout remettre à zéro
+  const v = peekVideo();
+  if (!v.duration){                      // pas encore prêt: on retentera au chargement
+    peekWant = t;
+    v.addEventListener('loadeddata', pumpPeek, { once:true });
+    v.addEventListener('error', () => { peekWant = null; }, { once:true });
+    return;
+  }
+  peekWant = null;
+  peekBusy = true;
+  const draw = () => {
+    peekBusy = false;
+    const c = $('#sThumb'), ctx = c.getContext('2d');
+    try { ctx.drawImage(v, 0, 0, c.width, c.height); } catch(e){}
+    pumpPeek();
+  };
+  const give = setTimeout(() => { peekBusy = false; }, 2500);
+  v.addEventListener('seeked', () => { clearTimeout(give); draw(); }, { once:true });
+  try { v.currentTime = Math.min(t, Math.max(v.duration - 0.2, 0)); }
+  catch(e){ clearTimeout(give); peekBusy = false; }
+}
+scrub.addEventListener('pointermove', (ev) => {
+  const p = scrubAt(ev), b = $('#sBubble');
+  const d = V.duration || 0;
+  b.classList.toggle('novid', !peekable());
+  // la bulle reste dans le cadre, même tout au bord de la barre
+  const r = scrub.getBoundingClientRect();
+  const half = (b.offsetWidth || 0) / 2;
+  const x = Math.max(half, Math.min(r.width - half, p * r.width));
+  b.style.left = x + 'px';
+  $('#sTime').textContent = fmtTime(p * d);
+  if (peekable()){ peekWant = p * d; pumpPeek(); }
+});
+scrub.addEventListener('pointerleave', () => { peekWant = null; });
+let dragging = false;
+scrub.addEventListener('pointerdown', (ev) => {
+  dragging = true; scrub.classList.add('drag'); scrub.setPointerCapture(ev.pointerId);
+  if (V.duration) V.currentTime = scrubAt(ev) * V.duration;
+});
+scrub.addEventListener('pointermove', (ev) => { if (dragging && V.duration) V.currentTime = scrubAt(ev) * V.duration; });
+['pointerup','pointercancel'].forEach(t => scrub.addEventListener(t, (ev) => {
+  dragging = false; scrub.classList.remove('drag');
+  try { scrub.releasePointerCapture(ev.pointerId); } catch(e){}
+}));
+
+/* ---------------------------------------------------- générique ----- */
+/* Un repère par épisode: la longueur du générique varie d'un épisode à l'autre.
+   Le menu propose de recopier le repère sur toute la saison quand il ne bouge pas. */
+/* Deux repères par épisode: le générique de début et celui de fin. Même
+   mécanique pour les deux, seule la clé change. Leur longueur varie d'un
+   épisode à l'autre, d'où le menu qui propose de recopier sur la saison. */
+const SEGS = {
+  intro: { cle:'intro.', auto:'introAuto', titre:'Générique de début', quoi:'le générique' },
+  fin:   { cle:'outro.', auto:'outroAuto', titre:'Générique de fin',   quoi:'le générique de fin' }
+};
+const SEG_KINDS = ['intro', 'fin'];
+function segKey(ep, k){ return SEGS[k].cle + ep.rel; }
+function getSeg(ep, k){
+  if (!ep) return null;
+  if (S.shared) return (k === 'fin' ? S.host.outro : S.host.intro)[ep.rel] || null;
+  return store.get(segKey(ep, k), null);
+}
+function setSeg(k, patch){
+  if (!S.current || lectureSeule()) return;
+  const cur = store.get(segKey(S.current, k), null) || {};
+  store.set(segKey(S.current, k), Object.assign({}, cur, patch));
+  saveSidecar(S.current.anime);
+  paintSegZones(); buildIntroMenu(); poke();
+}
+function clearSeg(k){
+  if (!S.current || lectureSeule()) return;
+  store.del(segKey(S.current, k));
+  saveSidecar(S.current.anime);
+  hideSkip(); paintSegZones(); buildIntroMenu();
+}
+function segReady(seg){
+  return !!(seg && seg.start != null && seg.end != null && seg.end > seg.start + 0.5);
+}
+/** Bandes colorées sur la barre de temps, à l'emplacement des génériques. */
+function paintSegZones(){
+  const d = V.duration;
+  for (const k of SEG_KINDS){
+    const seg = getSeg(S.current, k), el = $(k === 'fin' ? '#sOutro' : '#sIntro');
+    if (!segReady(seg) || !d || !isFinite(d)){ el.hidden = true; continue; }
+    el.hidden = false;
+    el.style.left  = (seg.start / d * 100) + '%';
+    el.style.width = ((seg.end - seg.start) / d * 100) + '%';
+  }
+}
+/** Recopie un repère sur tous les épisodes de la même saison. */
+function spreadSeg(k){
+  const seg = getSeg(S.current, k);
+  if (!segReady(seg) || !S.current || lectureSeule()) return;
+  const a = S.byKey.get(S.current.anime);
+  if (!a) return;
+  let n = 0;
+  for (const e of a.episodes){
+    if (e.seasonKey !== S.current.seasonKey || e.rel === S.current.rel) continue;
+    store.set(segKey(e, k), { start: seg.start, end: seg.end });
+    n++;
+  }
+  saveSidecar(S.current.anime);
+  toast(n ? 'Repère appliqué à ' + fmtCount(n, 'autre épisode', 'autres épisodes') : 'Aucun autre épisode dans la saison', 'ok');
+  buildIntroMenu();
+}
+function buildIntroMenu(){
+  const bloc = (k) => {
+    const seg = getSeg(S.current, k) || {};
+    const auto = store.get(SEGS[k].auto, false);
+    const line = (label, val) => label + '<b>' + (val != null ? fmtTime(val) : '—') + '</b>';
+    return '<h4>' + SEGS[k].titre + '</h4>' +
+      (S.shared
+        ? '<button disabled>' + line('Début ', seg.start) + '</button>' +
+          '<button disabled>' + line('Fin ', seg.end) + '</button>'
+        : '<button data-seg="' + k + ':start">' + line('Marquer le début ', seg.start) + '</button>' +
+          '<button data-seg="' + k + ':end">' + line('Marquer la fin ', seg.end) + '</button>' +
+          (segReady(seg) ? '<button data-seg="' + k + ':spread">Appliquer à la saison</button>' : '')) +
+      '<button data-seg="' + k + ':auto" class="' + (auto ? 'on' : '') + '">Passer automatiquement<b>' +
+        (auto ? 'oui' : 'non') + '</b></button>' +
+      (!S.shared && (seg.start != null || seg.end != null)
+        ? '<button data-seg="' + k + ':clear">Effacer les repères</button>' : '');
+  };
+  const note = 'font-weight:400;text-transform:none;letter-spacing:0;line-height:1.4;padding-bottom:8px';
+  $('#introMenu').innerHTML =
+    bloc('intro') + '<div class="msep"></div>' + bloc('fin') +
+    '<h4 style="' + note + '">' +
+      (S.shared
+        ? 'Repères posés par l’hôte de la bibliothèque. Le choix de passer automatiquement, lui, est le tien.'
+        : 'Place-toi au bon moment, puis clique.<br>' +
+          (S.canWrite
+            ? 'Enregistré dans <b style="font-weight:600">' + SIDECAR + '</b>, dans le dossier de la série.'
+            : 'Enregistré dans ce navigateur seulement.')) + '</h4>';
+  $$('[data-seg]', $('#introMenu')).forEach(b => b.addEventListener('click', () => {
+    const [k, quoi] = b.dataset.seg.split(':');
+    if (quoi === 'start')       setSeg(k, { start: V.currentTime });
+    else if (quoi === 'end')    setSeg(k, { end: V.currentTime });
+    else if (quoi === 'spread') spreadSeg(k);
+    else if (quoi === 'auto'){  store.set(SEGS[k].auto, !store.get(SEGS[k].auto, false)); buildIntroMenu(); }
+    else                        clearSeg(k);
+  }));
+}
+let segInside = { intro:false, fin:false }, skipT = null, skipKind = null;
+function checkSegs(){
+  const t = V.currentTime;
+  for (const k of SEG_KINDS){
+    const seg = getSeg(S.current, k);
+    if (!segReady(seg)) continue;
+    const inside = t >= seg.start && t < seg.end - 0.3;
+    if (!inside){
+      if (segInside[k]){ segInside[k] = false; if (skipKind === k) hideSkip(); }
+      continue;
+    }
+    if (segInside[k]) continue;                  // déjà proposé pour cette entrée
+    segInside[k] = true;
+    if (store.get(SEGS[k].auto, false)){ V.currentTime = seg.end; return; }
+    showSkip(k);
+  }
+}
+function showSkip(k){
+  // la carte « épisode suivant » propose déjà la sortie: deux offres au même
+  // endroit se recouvriraient
+  if ($('#nextCard').classList.contains('on')) return;
+  skipKind = k;
+  const b = $('#skipIntro');
+  $('#skipLabel').textContent = 'Passer ' + SEGS[k].quoi;
+  b.hidden = false;
+  requestAnimationFrame(() => b.classList.add('on'));
+  clearTimeout(skipT);
+  // 3 secondes réelles: setTimeout ignore la vitesse de lecture
+  skipT = setTimeout(hideSkip, 3000);
+}
+function hideSkip(){
+  clearTimeout(skipT);
+  skipKind = null;
+  const b = $('#skipIntro');
+  b.classList.remove('on');
+  setTimeout(() => { if (!b.classList.contains('on')) b.hidden = true; }, 260);
+}
+$('#skipIntro').addEventListener('click', () => {
+  const seg = getSeg(S.current, skipKind || 'intro');
+  if (segReady(seg)) V.currentTime = seg.end;
+  hideSkip();
+});
+$('#pIntro').addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  const m = $('#introMenu');
+  m.hidden = !m.hidden;
+  if (!m.hidden) buildIntroMenu();
+});
+const MENUS = ['#introMenu', '#audMenu', '#subMenu'];
+function ouvrirMenu(id, remplir){
+  return (ev) => {
+    ev.stopPropagation();
+    const m = $(id), ouvert = m.hidden;
+    MENUS.forEach(k => { $(k).hidden = true; });   // un seul menu a la fois
+    if (ouvert){ remplir(); m.hidden = false; }
+  };
+}
+$('#pAudio').addEventListener('click', ouvrirMenu('#audMenu', buildAudMenu));
+$('#pSubs').addEventListener('click',  ouvrirMenu('#subMenu', buildSubMenu));
+MENUS.forEach(k => $(k).addEventListener('click', (ev) => ev.stopPropagation()));
+P.addEventListener('click', () => { MENUS.forEach(k => { $(k).hidden = true; }); });
+V.addEventListener('seeked', () => { segInside = { intro:false, fin:false }; });
+
+/* ------------------------------------------------- épisode suivant -- */
+function nextEpisode(){
+  if (!S.current || !S.queue.length) return null;
+  const i = S.queue.findIndex(e => e.rel === S.current.rel);
+  return i >= 0 && i + 1 < S.queue.length ? S.queue[i + 1] : null;
+}
+function showNext(){
+  const n = nextEpisode();
+  if (!n || $('#nextCard').classList.contains('on')) return;
+  hideSkip();                                    // la carte prend le relais
+  const a = S.byKey.get(n.anime);
+  $('#nName').textContent = (a ? a.title + ' · ' : '') + n.title;
+  const th = store.get('th.' + n.rel, null);
+  if (th){ $('#nImg').src = th; $('#nImg').style.display = ''; }
+  else   { $('#nImg').removeAttribute('src'); $('#nImg').style.display = 'none'; }
+  nextCount = 10;
+  $('#nRing').textContent = nextCount;
+  $('#nextCard').classList.add('on');
+  clearTimeout(nextT);
+  const tick = () => {
+    nextCount--;
+    $('#nRing').textContent = nextCount;
+    if (nextCount <= 0) playNext(true);
+    else nextT = setTimeout(tick, 1000);
+  };
+  nextT = setTimeout(tick, 1000);
+}
+function hideNext(){ clearTimeout(nextT); $('#nextCard').classList.remove('on'); }
+function playNext(force){
+  const n = nextEpisode();
+  hideNext();
+  if (!n) { if (force) toast('Dernier épisode de la série'); else closePlayer(); return; }
+  openPlayer(n);
+}
+$('#nGo').addEventListener('click', () => playNext(true));
+$('#nNo').addEventListener('click', hideNext);
+
+/* --------------------------------------------------- raccourcis ----- */
+addEventListener('keydown', (ev) => {
+  if (P.hidden || ev.target.matches('input,textarea')) return;
+  const k = ev.key.toLowerCase();
+  if (k === ' ' || k === 'k'){ ev.preventDefault(); V.paused ? V.play() : V.pause(); }
+  else if (ev.key === 'ArrowRight'){ ev.preventDefault(); skip(ev.shiftKey ? 60 : 10); }
+  else if (ev.key === 'ArrowLeft') { ev.preventDefault(); skip(ev.shiftKey ? -60 : -10); }
+  else if (ev.key === 'ArrowUp')   { ev.preventDefault(); const o = sortie(); o.volume = Math.min(1, o.volume + .08); o.muted = false; $('#pVol').value = o.volume; store.set('vol', o.volume); paintVol(); }
+  else if (ev.key === 'ArrowDown') { ev.preventDefault(); const o = sortie(); o.volume = Math.max(0, o.volume - .08); $('#pVol').value = o.volume; store.set('vol', o.volume); paintVol(); }
+  else if (k === 'f'){ toggleFull(); }
+  else if (k === 'm'){ V.muted = !V.muted; paintVol(); }
+  else if (k === 'n'){ playNext(true); }
+  else if (k === 'escape'){ if (document.fullscreenElement) document.exitFullscreen().catch(()=>{}); else closePlayer(); }
+  else if (k >= '0' && k <= '9'){ if (V.duration) V.currentTime = V.duration * (parseInt(k,10) / 10); }
+  poke();
+});
+addEventListener('beforeunload', () => { saveNow(); flushProgress(); edDwellFin(); edStatsEcrire(); });

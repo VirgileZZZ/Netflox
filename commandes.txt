@@ -1,0 +1,1 @@
+python main.py --url "https://anime-sama.to/catalogue/demon-slayer/" --player "AnsEmbed" --episodes "all" --no-mal --quality best

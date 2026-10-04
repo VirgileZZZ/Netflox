@@ -1,0 +1,125 @@
+# ================================================================
+# Netflox — ne jamais versionner:
+#  - les medias (plusieurs dizaines de Go, hors limite GitHub)
+#  - les secrets (cookie Cloudflare de l'outil de telechargement)
+#  - ce qui est regenere ou recupere tout seul
+# ================================================================
+
+# --- SECRETS : cookie Cloudflare cf_clearance, User-Agent -------
+# Ecrit par main.py dans src/utils/config/config.json
+src/utils/config/config.json
+
+# --- Bibliotheque media : videos, scans, archives --------------
+videos/
+video/
+scans/
+sauvegardes*/
+*.mp4
+*.m4v
+*.webm
+*.mov
+*.mkv
+*.ts
+*.m2ts
+*.avi
+*.flv
+*.ogv
+*.m4a
+*.mp3
+*.aac
+*.opus
+*.ogg
+*.wav
+*.vtt
+*.srt
+*.ass
+*.ssa
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.avif
+*.gif
+*.bmp
+*.pdf
+*.epub
+*.cbz
+*.cbr
+*.zip
+*.rar
+*.7z
+
+# --- Index et caches generes ------------------------------------
+# Manifeste ecrit par partager.bat a chaque lancement
+bibliotheque-index.json
+outils/cloudflared.txt
+outils/cloudflared.exe
+outils/cache-imdb/
+
+# --- Fichiers de travail / sauvegardes ------------------------
+index/
+save du projet/
+*.avant.*
+*.bak
+*.backup
+*.old
+*.orig
+*.part
+*.tmp
+*.log
+*.swp
+*~
+$RECYCLE.BIN/
+
+# --- Byte-compiled / optimized ----------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# --- Distribution / packaging -----------------------------------
+.Python
+*.egg-info/
+dist/
+build/
+*.whl
+
+# --- Environnements ---------------------------------------------
+venv/
+env/
+.venv/
+.python-version
+
+# --- Outils / IDE -----------------------------------------------
+.mypy_cache/
+.cache
+pytest_debug.log
+.coverage
+*.cover
+htmlcov/
+.ipynb_checkpoints
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+node_modules/
+
+# --- OS ---------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+Desktop.ini:encryptable
+*.lnk
+
+# --- Divers -----------------------------------------------------
+.env
+*.env
+*.exe
+*.dll
+*.so
