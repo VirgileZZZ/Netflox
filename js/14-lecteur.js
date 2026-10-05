@@ -140,6 +140,9 @@ function appliquerSousTitres(){
 }
 /** Les <track> d'un episode, avec la langue retenue la derniere fois. */
 async function poserSousTitres(ep){
+  /* Eteindre avant de retirer: Chrome garde a l'ecran la derniere replique
+     d'une piste qu'on enleve allumee, et l'episode suivant demarrait avec. */
+  [...V.textTracks].forEach(t => { t.mode = 'disabled'; });
   $$('track', V).forEach(t => t.remove());
   subUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(e){} });
   subUrls = [];
