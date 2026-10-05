@@ -174,12 +174,19 @@ V.addEventListener('leavepictureinpicture', appliquerSousTitres);
 /* La place des sous-titres: glisser pour les deplacer, double-clic pour les
    remettre en bas. Retenue d'un episode et d'une visite a l'autre, en
    fraction de l'ecran pour tenir en plein ecran comme en fenetre. */
-const POS_ST = { x:.5, y:.88 };
+/* Sur telephone — debout, la barre tient sur deux lignes; couche, l'image est
+   basse — on part un peu plus haut. Calcule a chaque fois: le telephone tourne. */
+function posDefaut(){
+  return { x:.5, y: matchMedia('(max-width:560px), (max-height:500px)').matches ? .78 : .88 };
+}
 function placerSousTitres(pos){
   CUES.style.left = (pos.x * 100) + '%';
   CUES.style.top  = (pos.y * 100) + '%';
 }
-placerSousTitres(store.get('subpos', null) || POS_ST);
+placerSousTitres(store.get('subpos', null) || posDefaut());
+matchMedia('(orientation:landscape)').addEventListener('change', () => {
+  if (!store.get('subpos', null)) placerSousTitres(posDefaut());
+});
 (() => {
   let prise = null;
   CUES.addEventListener('pointerdown', (ev) => {
@@ -210,8 +217,8 @@ placerSousTitres(store.get('subpos', null) || POS_ST);
   CUES.addEventListener('pointercancel', lacher);
   CUES.addEventListener('dblclick', (ev) => {
     ev.stopPropagation();
-    store.set('subpos', POS_ST);
-    placerSousTitres(POS_ST);
+    store.set('subpos', null);
+    placerSousTitres(posDefaut());
   });
 })();
 /** Les <track> d'un episode, avec la langue retenue la derniere fois. */
@@ -457,7 +464,9 @@ $('#pVol').addEventListener('input', (ev) => {
 });
 function paintVol(){
   const o = sortie();
-  $('#pMute').innerHTML = (o.muted || o.volume === 0) ? ICON_MUTE : ICON_VOL;
+  const coupe = o.muted || o.volume === 0;
+  $('#pMute').innerHTML = coupe ? ICON_MUTE : ICON_VOL;
+  $('#pMute').dataset.tip = coupe ? 'Remettre le son (M)' : 'Couper le son (M)';
 }
 
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -477,12 +486,23 @@ function skip(d){
 }
 function toggleFull(){
   if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
-  else P.requestFullscreen().catch(() => toast('Plein écran refusé', 'bad'));
+  else P.requestFullscreen().then(tournerEnPaysage, () => toast('Plein écran refusé', 'bad'));
 }
+/* Sur telephone, le plein ecran couche aussi l'image, comme une appli video.
+   Android le permet; l'iPhone ne laisse pas une page choisir, il suit le
+   capteur. Une video plus haute que large (rare) reste debout. */
+function tournerEnPaysage(){
+  if (!matchMedia('(pointer:coarse)').matches) return;
+  if (V.videoWidth && V.videoWidth < V.videoHeight) return;
+  try { screen.orientation.lock('landscape').catch(() => {}); } catch(e){}
+}
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) try { screen.orientation.unlock(); } catch(e){}
+});
 
-V.addEventListener('play',  () => { $('#pPlay').innerHTML = ICON_PAUSE; showCenter(false); P.classList.add('jouant'); poke(); });
+V.addEventListener('play',  () => { $('#pPlay').innerHTML = ICON_PAUSE; $('#pPlay').dataset.tip = 'Pause (K)'; showCenter(false); P.classList.add('jouant'); poke(); });
 V.addEventListener('pause', () => {
-  $('#pPlay').innerHTML = ICON_PLAY; showCenter(true); P.classList.remove('hide-ui', 'jouant'); clearTimeout(hideT);
+  $('#pPlay').innerHTML = ICON_PLAY; $('#pPlay').dataset.tip = 'Lecture (K)'; showCenter(true); P.classList.remove('hide-ui', 'jouant'); clearTimeout(hideT);
   saveNow(); flushProgress();                 // moment calme: on pose la progression sur le disque
 });
 V.addEventListener('timeupdate', () => {

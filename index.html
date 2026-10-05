@@ -417,7 +417,7 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
 /* Les sous-titres: dessines par la page et non par Chrome, pour les poser
    sans fond et les deplacer. Le point (left,top) est le bas de la replique. */
 .pcues{position:absolute;left:50%;top:88%;transform:translate(-50%,-100%);z-index:3;max-width:90%;
-  text-align:center;white-space:pre-line;line-height:1.25;font-size:clamp(17px,3.4vh,46px);font-weight:600;color:#fff;
+  text-align:center;white-space:pre-line;line-height:1.25;font-size:clamp(16px,min(3.4vh,5.2vw),46px);font-weight:600;color:#fff;
   -webkit-text-stroke:.16em rgba(0,0,0,.85);paint-order:stroke fill;text-shadow:0 2px 6px rgba(0,0,0,.6);
   cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none}
 .pcues:empty{pointer-events:none}
@@ -454,10 +454,37 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
 .scrub:hover .bubble,.scrub.drag .bubble{opacity:1}
 .pctrl{display:flex;align-items:center;gap:6px}
 .pctrl .gap{flex:1}
-.pbtn{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;color:#fff;transition:.15s;position:relative;flex:none}
-.pbtn:hover{background:rgba(255,255,255,.16);transform:scale(1.06)}
-.pbtn.wide{width:auto;padding:0 13px;gap:7px;font-size:.85rem;font-weight:600;display:flex}
-.ptime{font-size:.84rem;font-weight:600;color:#dcdcea;padding:0 8px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pbtn{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;color:#fff;transition:background .15s,transform .12s,color .15s;position:relative;flex:none}
+.pbtn:hover{background:rgba(255,255,255,.14)}
+.pbtn:active{transform:scale(.9)}
+.pbtn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent2)}
+.pbtn svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
+/* Lecture/pause: le bouton qu'on cherche des yeux, en pastille pleine. */
+#pPlay{width:46px;height:46px;background:#fff;color:#0b0b10;margin-right:4px}
+#pPlay:hover{background:#fff;transform:scale(1.07)}
+#pPlay:active{transform:scale(.93)}
+#pPlay svg{filter:none}
+.pbtn.wide{width:auto;height:30px;margin:0 4px;padding:0 10px;border-radius:8px;border:1.5px solid rgba(255,255,255,.55);
+  font-size:.8rem;font-weight:700;display:flex;align-items:center;font-variant-numeric:tabular-nums}
+.pbtn.wide:hover{border-color:#fff}
+.psep{width:1px;height:22px;background:rgba(255,255,255,.22);margin:0 6px;flex:none}
+/* Le nom du bouton et sa touche, au survol — seulement avec une souris. */
+@media (hover:hover){
+  .pbtn[data-tip]::after{
+    content:attr(data-tip);position:absolute;bottom:calc(100% + 10px);left:50%;transform:translate(-50%,4px);
+    background:rgba(14,14,20,.96);border:1px solid var(--line2);color:#fff;font-size:.74rem;font-weight:600;
+    padding:5px 9px;border-radius:7px;white-space:nowrap;opacity:0;pointer-events:none;
+    transition:opacity .15s,transform .15s;z-index:7;box-shadow:0 6px 18px rgba(0,0,0,.45);
+  }
+  .pbtn[data-tip]:hover::after{opacity:1;transform:translate(-50%,0);transition-delay:.3s}
+  /* aux bords, la bulle s'aligne sur le bouton au lieu de deborder de l'ecran */
+  .pctrl > .pbtn:first-child::after,.ptop .pbtn::after{left:0;transform:translateY(4px)}
+  .pctrl > .pbtn:last-child::after{left:auto;right:0;transform:translateY(4px)}
+  .pctrl > .pbtn:first-child:hover::after,.ptop .pbtn:hover::after,.pctrl > .pbtn:last-child:hover::after{transform:none}
+  .ptop .pbtn::after{bottom:auto;top:calc(100% + 8px)}
+  .player:has(.menu:not([hidden])) .pbtn::after{display:none}
+}
+.ptime{font-size:.9rem;font-weight:600;color:#ececf5;padding:0 10px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ptime i{color:#8b8ba3;font-style:normal}
 .volwrap{display:flex;align-items:center;gap:6px}
 .volbar{width:0;overflow:hidden;transition:width .2s}
@@ -499,6 +526,7 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
 #audMenu button.on::after,
 #subMenu button.on::after{content:'\2713';font-weight:700}
 .pbtn.marque{color:var(--accent2)}
+.pbtn.marque::before{content:'';position:absolute;bottom:3px;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--accent2)}
 .menu button.on{color:var(--accent2);font-weight:700}
 .menu h4{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);padding:7px 11px 4px}
 .menu button[disabled]{opacity:.8;cursor:default}
@@ -946,7 +974,9 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
   .pctrl .gap{flex:0 0 100%;height:0}
   .volwrap{display:none}
   .pbtn{width:38px;height:38px}
-  .pbtn.wide{padding:0 10px}
+  #pPlay{width:42px;height:42px}
+  .pbtn.wide{padding:0 8px}
+  .psep{display:none}
   .ptime{font-size:.82rem;padding:0 6px}
   .scrub{height:26px;margin-bottom:4px}
   .scrub .track{height:6px}
@@ -954,6 +984,21 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
   .scrub .bubble canvas{width:132px;height:74px}
   .pcenter button{width:66px;height:66px}
   .skipfb{width:80px;height:80px}
+}
+
+/* --- lecteur sur un telephone tourne: toute la largeur, peu de hauteur ---
+   La barre du bas mangeait un tiers de l'image et passait sur les
+   sous-titres: on la serre, et le volume part (le telephone a ses touches).
+   Les marges suivent l'encoche, a gauche comme a droite. */
+@media (max-height:500px) and (orientation:landscape){
+  .ptop{padding:10px max(16px,env(safe-area-inset-right)) 34px max(16px,env(safe-area-inset-left))}
+  .pbot{padding:36px max(16px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+  .scrub{margin-bottom:0}
+  .pbtn{width:36px;height:36px}
+  #pPlay{width:40px;height:40px}
+  .pbtn.wide{height:28px}
+  .volwrap{display:none}
+  .pcenter button{width:62px;height:62px}
 }
 
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms !important;transition-duration:.01ms !important}}
@@ -1024,7 +1069,7 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
   <div class="skipfb fwd" id="fbFwd">10s »</div>
 
   <div class="pfade ptop">
-    <button class="pbtn" id="pClose" aria-label="Fermer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M19 12H5m0 0 6-6m-6 6 6 6"/></svg></button>
+    <button class="pbtn" id="pClose" aria-label="Fermer" data-tip="Fermer (Échap)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M19 12H5m0 0 6-6m-6 6 6 6"/></svg></button>
     <div><div class="ptitle" id="pTitle"></div><div class="psub" id="pSub"></div></div>
   </div>
 
@@ -1035,22 +1080,23 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
       <div class="bubble" id="sBubble"><canvas id="sThumb" width="168" height="94"></canvas><b id="sTime">0:00</b></div>
     </div>
     <div class="pctrl">
-      <button class="pbtn" id="pPlay" aria-label="Lecture"></button>
-      <button class="pbtn" id="pBack" aria-label="Reculer de 10 secondes"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 4 9l7 4z"/><path d="M20 12a8 8 0 0 1-8 8"/><path d="M12 4a8 8 0 0 1 8 8"/></svg></button>
-      <button class="pbtn" id="pFwd" aria-label="Avancer de 10 secondes"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 5 7 4-7 4z"/><path d="M4 12a8 8 0 0 0 8 8"/><path d="M12 4a8 8 0 0 0-8 8"/></svg></button>
+      <button class="pbtn" id="pPlay" aria-label="Lecture" data-tip="Lecture (K)"></button>
+      <button class="pbtn" id="pBack" aria-label="Reculer de 10 secondes" data-tip="Reculer de 10 s (←)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.6 12.5A8.5 8.5 0 1 0 6.3 5.8"/><path d="M6.6 2.6 6.3 5.8 9.5 6.3"/><text x="12.4" y="15.7" text-anchor="middle" font-size="8.4" font-weight="800" fill="currentColor" stroke="none">10</text></svg></button>
+      <button class="pbtn" id="pFwd" aria-label="Avancer de 10 secondes" data-tip="Avancer de 10 s (→)"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20.4 12.5A8.5 8.5 0 1 1 17.7 5.8"/><path d="M17.4 2.6 17.7 5.8 14.5 6.3"/><text x="11.6" y="15.7" text-anchor="middle" font-size="8.4" font-weight="800" fill="currentColor" stroke="none">10</text></svg></button>
       <div class="volwrap">
-        <button class="pbtn" id="pMute" aria-label="Couper le son"></button>
+        <button class="pbtn" id="pMute" aria-label="Couper le son" data-tip="Couper le son (M)"></button>
         <div class="volbar"><input id="pVol" type="range" min="0" max="1" step="0.02" value="1" aria-label="Volume"></div>
       </div>
       <div class="ptime"><span id="tNow">0:00</span> <i>/ <span id="tAll">0:00</span></i></div>
       <div class="gap"></div>
-      <button class="pbtn wide" id="pRate">1×</button>
-      <button class="pbtn" id="pAudio" aria-label="Langue" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg></button>
-      <button class="pbtn" id="pSubs" aria-label="Sous-titres" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 14h4m2 0h4" stroke-linecap="round"/></svg></button>
-      <button class="pbtn" id="pIntro" aria-label="Repères du générique"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg></button>
-      <button class="pbtn" id="pNext" aria-label="Épisode suivant"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 5 10 7-10 7z"/><path d="M19 5v14"/></svg></button>
-      <button class="pbtn" id="pPip" aria-label="Mini-lecteur"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><rect x="12" y="11" width="8" height="7" rx="1.5" fill="currentColor"/></svg></button>
-      <button class="pbtn" id="pFull" aria-label="Plein écran"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3m13 5h3a2 2 0 0 0 2-2v-3"/></svg></button>
+      <button class="pbtn wide" id="pRate" aria-label="Vitesse de lecture" data-tip="Vitesse">1×</button>
+      <button class="pbtn" id="pAudio" aria-label="Langue" data-tip="Langue" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg></button>
+      <button class="pbtn" id="pSubs" aria-label="Sous-titres" data-tip="Sous-titres" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 14h4m2 0h4" stroke-linecap="round"/></svg></button>
+      <button class="pbtn" id="pIntro" aria-label="Repères du générique" data-tip="Repères du générique"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg></button>
+      <span class="psep" aria-hidden="true"></span>
+      <button class="pbtn" id="pNext" aria-label="Épisode suivant" data-tip="Épisode suivant (N)"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 5 10 7-10 7z"/><path d="M19 5v14"/></svg></button>
+      <button class="pbtn" id="pPip" aria-label="Mini-lecteur" data-tip="Mini-lecteur"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><rect x="12" y="11" width="8" height="7" rx="1.5" fill="currentColor"/></svg></button>
+      <button class="pbtn" id="pFull" aria-label="Plein écran" data-tip="Plein écran (F)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3m13 5h3a2 2 0 0 0 2-2v-3"/></svg></button>
     </div>
   </div>
 
@@ -1150,21 +1196,21 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
      pas charger de module, le navigateur y voit une requete inter-origines
      et la refuse. Ils partagent donc la meme portee globale, comme lorsque
      tout tenait dans une seule balise — et l'ordre ci-dessous compte. -->
-<script src="js/01-outils.js?v=20261005b"></script>
-<script src="js/02-algo-edits.js?v=20261005b"></script>
-<script src="js/03-etat.js?v=20261005b"></script>
-<script src="js/04-dossier.js?v=20261005b"></script>
-<script src="js/05-scan.js?v=20261005b"></script>
-<script src="js/06-accompagnement.js?v=20261005b"></script>
-<script src="js/07-rendu.js?v=20261005b"></script>
-<script src="js/08-partage.js?v=20261005b"></script>
-<script src="js/09-fiches.js?v=20261005b"></script>
-<script src="js/10-vignettes.js?v=20261005b"></script>
-<script src="js/11-documents.js?v=20261005b"></script>
-<script src="js/12-lecteur-scans.js?v=20261005b"></script>
-<script src="js/13-fil-edits.js?v=20261005b"></script>
-<script src="js/14-lecteur.js?v=20261005b"></script>
-<script src="js/15-demarrage.js?v=20261005b"></script>
+<script src="js/01-outils.js?v=20261005d"></script>
+<script src="js/02-algo-edits.js?v=20261005d"></script>
+<script src="js/03-etat.js?v=20261005d"></script>
+<script src="js/04-dossier.js?v=20261005d"></script>
+<script src="js/05-scan.js?v=20261005d"></script>
+<script src="js/06-accompagnement.js?v=20261005d"></script>
+<script src="js/07-rendu.js?v=20261005d"></script>
+<script src="js/08-partage.js?v=20261005d"></script>
+<script src="js/09-fiches.js?v=20261005d"></script>
+<script src="js/10-vignettes.js?v=20261005d"></script>
+<script src="js/11-documents.js?v=20261005d"></script>
+<script src="js/12-lecteur-scans.js?v=20261005d"></script>
+<script src="js/13-fil-edits.js?v=20261005d"></script>
+<script src="js/14-lecteur.js?v=20261005d"></script>
+<script src="js/15-demarrage.js?v=20261005d"></script>
 
 </body>
 </html>
