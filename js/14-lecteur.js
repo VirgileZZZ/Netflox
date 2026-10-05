@@ -102,7 +102,7 @@ function buildAudMenu(){
 }
 function buildSubMenu(){
   const pistes = [...V.textTracks];
-  const actif = pistes.findIndex(t => t.mode === 'showing');
+  const actif = pistes.findIndex(t => t.mode !== 'disabled');
   $('#subMenu').innerHTML =
     '<h4>Sous-titres</h4>' +
     '<button data-sub="-1"' + (actif < 0 ? ' class="on"' : '') + '>Aucun</button>' +
@@ -112,7 +112,8 @@ function buildSubMenu(){
   $$('[data-sub]', $('#subMenu')).forEach(b => b.addEventListener('click', () => {
     const i = +b.dataset.sub;
     stVoulue = i < 0 ? '' : (pistes[i].language || '');
-    pistes.forEach((t,k) => { t.mode = k === i ? 'showing' : 'disabled'; });
+    pistes.forEach((t,k) => { t.mode = k === i ? modeAllume() : 'disabled'; });
+    suivrePiste(i < 0 ? null : pistes[i]);
     store.set('sublang', stVoulue);
     $('#pSubs').classList.toggle('marque', i >= 0);
     buildSubMenu();
@@ -133,16 +134,92 @@ function appliquerSousTitres(){
   const pistes = [...V.textTracks];
   const i = stVoulue ? pistes.findIndex(t => t.language === stVoulue) : -1;
   pistes.forEach((t,k) => {
-    const m = k === i ? 'showing' : 'disabled';
+    const m = k === i ? modeAllume() : 'disabled';
     if (t.mode !== m) t.mode = m;
   });
+  suivrePiste(i >= 0 ? pistes[i] : null);
   $('#pSubs').classList.toggle('marque', i >= 0);
 }
+
+/* ------------------------------------------ affichage des repliques --
+   Chrome dessine les sous-titres sur un pave noir qu'on ne peut ni enlever
+   proprement ni deplacer. La piste choisie reste donc en mode « hidden » —
+   elle charge et suit le temps, sans rien dessiner — et c'est #pCues qui
+   affiche ses repliques. Seule exception, le mini-lecteur: notre calque n'y
+   va pas, Chrome reprend la main. */
+const CUES = $('#pCues');
+let pisteAffichee = null;
+function modeAllume(){ return document.pictureInPictureElement === V ? 'showing' : 'hidden'; }
+function rendreReplique(){
+  CUES.textContent = '';
+  const t = pisteAffichee;
+  if (!t || !t.activeCues) return;
+  for (const c of t.activeCues){
+    const l = document.createElement('div');
+    l.appendChild(c.getCueAsHTML ? c.getCueAsHTML() : document.createTextNode(c.text));
+    CUES.appendChild(l);
+  }
+}
+function suivrePiste(t){
+  if (pisteAffichee !== t){
+    if (pisteAffichee) pisteAffichee.removeEventListener('cuechange', rendreReplique);
+    pisteAffichee = t;
+    if (t) t.addEventListener('cuechange', rendreReplique);
+  }
+  rendreReplique();
+}
+V.addEventListener('enterpictureinpicture', appliquerSousTitres);
+V.addEventListener('leavepictureinpicture', appliquerSousTitres);
+
+/* La place des sous-titres: glisser pour les deplacer, double-clic pour les
+   remettre en bas. Retenue d'un episode et d'une visite a l'autre, en
+   fraction de l'ecran pour tenir en plein ecran comme en fenetre. */
+const POS_ST = { x:.5, y:.88 };
+function placerSousTitres(pos){
+  CUES.style.left = (pos.x * 100) + '%';
+  CUES.style.top  = (pos.y * 100) + '%';
+}
+placerSousTitres(store.get('subpos', null) || POS_ST);
+(() => {
+  let prise = null;
+  CUES.addEventListener('pointerdown', (ev) => {
+    if (ev.button) return;
+    const r = P.getBoundingClientRect(), b = CUES.getBoundingClientRect();
+    // l'ecart entre le doigt et le point d'ancrage (bas, milieu), garde pendant le geste
+    prise = { r, dx: (b.left + b.width / 2) - ev.clientX, dy: b.bottom - ev.clientY };
+    CUES.setPointerCapture(ev.pointerId);
+    CUES.classList.add('prise');
+    ev.preventDefault();
+  });
+  CUES.addEventListener('pointermove', (ev) => {
+    if (!prise) return;
+    const { r, dx, dy } = prise;
+    const x = Math.min(.95, Math.max(.05, (ev.clientX + dx - r.left) / r.width));
+    const y = Math.min(.98, Math.max(.08, (ev.clientY + dy - r.top) / r.height));
+    prise.pos = { x, y };
+    placerSousTitres(prise.pos);
+    poke();
+  });
+  const lacher = () => {
+    if (!prise) return;
+    if (prise.pos) store.set('subpos', prise.pos);
+    prise = null;
+    CUES.classList.remove('prise');
+  };
+  CUES.addEventListener('pointerup', lacher);
+  CUES.addEventListener('pointercancel', lacher);
+  CUES.addEventListener('dblclick', (ev) => {
+    ev.stopPropagation();
+    store.set('subpos', POS_ST);
+    placerSousTitres(POS_ST);
+  });
+})();
 /** Les <track> d'un episode, avec la langue retenue la derniere fois. */
 async function poserSousTitres(ep){
   /* Eteindre avant de retirer: Chrome garde a l'ecran la derniere replique
      d'une piste qu'on enleve allumee, et l'episode suivant demarrait avec. */
   [...V.textTracks].forEach(t => { t.mode = 'disabled'; });
+  suivrePiste(null);
   $$('track', V).forEach(t => t.remove());
   subUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(e){} });
   subUrls = [];
