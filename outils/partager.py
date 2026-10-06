@@ -10,8 +10,12 @@ Trois etapes:
 
 Le lien vit le temps que cette fenetre reste ouverte. Ctrl+C pour tout fermer.
 """
+import hashlib
+import hmac
+import http.cookies
 import http.server
 import json
+import secrets
 import mimetypes
 import os
 import re
@@ -299,9 +303,19 @@ _ADRESSES_HOTE = None
 
 
 def est_hote(handler):
-    """L'hote, c'est cette machine. Le tunnel Cloudflare arrive lui aussi de
-    127.0.0.1, mais il signe ses requetes: une requete signee vient d'ailleurs.
-    Un telephone sur la box arrive de sa propre adresse: il note en invite."""
+    """L'hote: cette machine, ou un compte qu'il a declare comme le sien depuis
+    elle. Sans ce second cas, l'hote connecte par le lien partage notait en
+    invite, et sa note comptait deux fois: dans sa fiche et chez les invites."""
+    if est_machine_hote(handler):
+        return True
+    compte = _session(handler)[0]
+    return bool(compte and compte.get("hote"))
+
+
+def est_machine_hote(handler):
+    """Cette machine. Le tunnel Cloudflare arrive lui aussi de 127.0.0.1, mais
+    il signe ses requetes: une requete signee vient d'ailleurs. Un telephone
+    sur la box arrive de sa propre adresse: il note en invite."""
     if handler.headers.get("Cf-Connecting-Ip") or handler.headers.get("Cf-Ray"):
         return False
     global _ADRESSES_HOTE
@@ -405,6 +419,187 @@ def noter(d, hote):
     return True, ""
 
 
+# ----------------------------------------------------------- les comptes ---
+"""Un compte leger pour les invites: un pseudo et un mot de passe, rien d'autre.
+
+Un lien Cloudflare temporaire est, pour le navigateur, un site neuf a chaque
+lancement: tout ce qu'il rangeait (progression, edits vus, reglages) restait
+sur l'ancien. Le compte garde ces infos ici, sur la machine de l'hote, et les
+rend sur n'importe quel lien. Il est facultatif: sans lui, tout marche, mais
+rien ne suit d'un lien a l'autre.
+
+Rangement: comptes/<empreinte du pseudo>.json, hors de videos/ — jamais servi.
+Le mot de passe n'y est pas: seulement son empreinte (PBKDF2, 200 000 tours,
+avec un sel). La session tient dans un cookie HttpOnly, que la page ne lit pas;
+le fichier n'en garde que l'empreinte."""
+COOKIE = "netflox_session"
+PSEUDO = re.compile(r"[A-Za-z0-9_.\- ]{3,24}$")
+_verrou_comptes = threading.Lock()
+_echecs = {}                                    # adresse -> heures des mots de passe rates
+ECHECS_MAX, ECHECS_FENETRE = 8, 600             # 8 essais rates en 10 minutes: on fait attendre
+
+
+def _dossier_comptes():
+    return os.path.join(RACINE, "comptes")
+
+
+def _id_compte(pseudo):
+    return hashlib.sha256(pseudo.strip().lower().encode("utf-8")).hexdigest()[:32]
+
+
+def _hacher(mdp, sel):
+    return hashlib.pbkdf2_hmac("sha256", mdp.encode("utf-8"), bytes.fromhex(sel), 200000).hex()
+
+
+def _empreinte(jeton):
+    return hashlib.sha256(jeton.encode("utf-8")).hexdigest()
+
+
+def _ouvrir_session(compte):
+    """Un jeton neuf; on garde les 20 dernieres sessions (un compte, plusieurs appareils)."""
+    jeton = secrets.token_urlsafe(32)
+    s = compte.setdefault("sessions", {})
+    s[_empreinte(jeton)] = int(time.time())
+    for vieux in sorted(s, key=s.get)[:-20]:
+        del s[vieux]
+    return jeton
+
+
+def _qui(handler):
+    return handler.headers.get("Cf-Connecting-Ip") or handler.client_address[0]
+
+
+def _trop_d_echecs(handler):
+    maintenant = time.time()
+    l = [t for t in _echecs.get(_qui(handler), []) if maintenant - t < ECHECS_FENETRE]
+    _echecs[_qui(handler)] = l
+    return len(l) >= ECHECS_MAX
+
+
+def compte_inscrire(pseudo, mdp, donnees):
+    if not isinstance(pseudo, str) or not PSEUDO.match(pseudo.strip()):
+        return None, "Pseudo : 3 à 24 lettres, chiffres, espaces, . _ -"
+    if not isinstance(mdp, str) or not 4 <= len(mdp) <= 200:
+        return None, "Mot de passe : 4 caractères au moins"
+    fid = _id_compte(pseudo)
+    fichier = os.path.join(_dossier_comptes(), fid + ".json")
+    with _verrou_comptes:
+        os.makedirs(_dossier_comptes(), exist_ok=True)
+        if os.path.exists(fichier):
+            return None, "Ce pseudo est déjà pris"
+        sel = secrets.token_hex(16)
+        maintenant = int(time.time())
+        compte = {"pseudo": pseudo.strip(), "sel": sel, "hash": _hacher(mdp, sel),
+                  "cree": maintenant, "maj": maintenant,
+                  "donnees": donnees if isinstance(donnees, dict) else {}, "sessions": {}}
+        jeton = _ouvrir_session(compte)
+        _ecrire(fichier, compte)
+    return (compte, fid + "." + jeton), ""
+
+
+def compte_connecter(handler, pseudo, mdp):
+    if _trop_d_echecs(handler):
+        return None, "Trop d'essais : réessaie dans quelques minutes"
+    if not isinstance(pseudo, str) or not isinstance(mdp, str) or not PSEUDO.match(pseudo.strip()):
+        return None, "Pseudo ou mot de passe incorrect"
+    fid = _id_compte(pseudo)
+    fichier = os.path.join(_dossier_comptes(), fid + ".json")
+    with _verrou_comptes:
+        compte = _lire_ou(fichier, None)
+        if not compte or not hmac.compare_digest(compte.get("hash", ""), _hacher(mdp, compte.get("sel", "00"))):
+            _echecs.setdefault(_qui(handler), []).append(time.time())
+            return None, "Pseudo ou mot de passe incorrect"
+        jeton = _ouvrir_session(compte)
+        _ecrire(fichier, compte)
+    return (compte, fid + "." + jeton), ""
+
+
+def _session(handler):
+    """Le compte du cookie, son fichier et son jeton; (None, None, None) sinon."""
+    brut = handler.headers.get("Cookie")
+    if not brut:
+        return None, None, None
+    try:
+        c = http.cookies.SimpleCookie(brut)
+    except http.cookies.CookieError:
+        return None, None, None
+    v = c.get(COOKIE)
+    if not v or "." not in v.value:
+        return None, None, None
+    fid, jeton = v.value.split(".", 1)
+    if not re.fullmatch(r"[0-9a-f]{32}", fid):
+        return None, None, None
+    fichier = os.path.join(_dossier_comptes(), fid + ".json")
+    compte = _lire_ou(fichier, None)
+    if not compte or _empreinte(jeton) not in (compte.get("sessions") or {}):
+        return None, None, None
+    return compte, fichier, jeton
+
+
+INVITE = re.compile(r"[A-Za-z0-9_-]{8,64}$")
+
+
+def _deplacer_votes(ancien, vers_hote=False, nouveau=None):
+    """Les votes d'invite d'un identifiant, dans toute la bibliotheque: rendus
+    a un autre identifiant (le compte qui vient de se connecter), ou portes dans
+    la fiche de l'hote. Une case deja prise chez le destinataire garde sa note:
+    on retire seulement le vote en double. Renvoie le nombre de votes touches."""
+    base = _base_media()
+    if not base:
+        return 0
+    touches = 0
+    with _verrou_notes:
+        for serie in os.listdir(base):
+            dossier = os.path.join(base, serie)
+            f_inv = os.path.join(dossier, NOTES_INVITES)
+            if not os.path.isfile(f_inv):
+                continue
+            inv = _lire_ou(f_inv, {})
+            fiche = _lire_ou(os.path.join(dossier, ACCOMPAGNEMENT), {"version": 1, "serie": serie}) if vers_hote else None
+            cibles = [("serie", None, inv.get("serie"))] + \
+                     [("ep", rel, v) for rel, v in (inv.get("episodes") or {}).items()]
+            change = fiche_change = False
+            for genre, rel, votes in cibles:
+                if not isinstance(votes, dict) or ancien not in votes:
+                    continue
+                note = votes.pop(ancien)
+                touches += 1
+                change = True
+                if vers_hote:
+                    if genre == "serie":
+                        if not fiche.get("note"):
+                            fiche["note"] = note; fiche_change = True
+                    else:
+                        t = fiche.get("notes_episodes") if isinstance(fiche.get("notes_episodes"), dict) else {}
+                        if not t.get(rel):
+                            t[rel] = note; fiche["notes_episodes"] = t; fiche_change = True
+                elif nouveau and nouveau not in votes:
+                    votes[nouveau] = note
+            if not change:
+                continue
+            if isinstance(inv.get("serie"), dict) and not inv["serie"]:
+                inv.pop("serie")
+            eps = inv.get("episodes")
+            if isinstance(eps, dict):
+                for rel in [r for r, v in eps.items() if not v]:
+                    del eps[rel]
+                if not eps:
+                    inv.pop("episodes")
+            _ecrire(f_inv, inv)
+            if fiche_change:
+                _ecrire(os.path.join(dossier, ACCOMPAGNEMENT), fiche)
+    return touches
+
+
+def _cookie(handler, valeur, age):
+    """HttpOnly: la page ne le voit pas. Secure des qu'on arrive en https
+    (le tunnel): un cookie de session ne voyage pas en clair."""
+    https = "https" in (handler.headers.get("Cf-Visitor") or "") or \
+            handler.headers.get("X-Forwarded-Proto") == "https"
+    return "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Lax%s" % (
+        COOKIE, valeur, age, "; Secure" if https else "")
+
+
 # -------------------------------------------------------------- serveur ----
 class Handler(http.server.SimpleHTTPRequestHandler):
     """Ajoute les requetes partielles: sans elles, impossible de se deplacer
@@ -445,39 +640,115 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def _chemin(self):
         return urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
 
-    def _json(self, data, code=200):
-        corps = json.dumps(data).encode("utf-8")
+    def _json(self, data, code=200, cookie=None):
+        corps = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(corps)))
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(corps)
 
     def do_GET(self):
-        # qui regarde: l'hote note dans sa fiche, un invite dans celle des invites
+        # qui regarde: l'hote note dans sa fiche, un invite dans celle des invites;
+        # et, s'il est connecte, son compte avec ce qu'il y a range
         if self._chemin() == "/__moi":
-            return self._json({"hote": est_hote(self)})
+            compte = _session(self)[0]
+            return self._json({"hote": est_hote(self), "machine": est_machine_hote(self), "comptes": True,
+                               "compte": {"pseudo": compte["pseudo"], "donnees": compte.get("donnees") or {},
+                                          "hote": bool(compte.get("hote"))}
+                                         if compte else None})
         super().do_GET()
 
     def do_POST(self):
-        if self._chemin() != "/__noter":
+        chemin = self._chemin()
+        if chemin != "/__noter" and not chemin.startswith("/__compte/"):
             self.send_error(404)
             return
+        limite = 4 * 1024 * 1024 if chemin in ("/__compte/sauver", "/__compte/inscription") else 4096
         try:
             n = int(self.headers.get("Content-Length") or 0)
-            if n <= 0 or n > 4096:
+            if n < 0 or n > limite:
                 raise ValueError
-            d = json.loads(self.rfile.read(n).decode("utf-8"))
+            d = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
             if not isinstance(d, dict):
                 raise ValueError
         except (ValueError, UnicodeDecodeError):
             return self._json({"ok": False, "erreur": "requete illisible"}, 400)
+        if chemin.startswith("/__compte/"):
+            return self._compte(chemin[len("/__compte/"):], d)
         hote = est_hote(self)
         try:
             ok, raison = noter(d, hote)
         except OSError:
             ok, raison = False, "ecriture impossible"
         self._json({"ok": ok, "erreur": raison, "hote": hote}, 200 if ok else 400)
+
+    def _compte(self, action, d):
+        try:
+            if action in ("inscription", "connexion"):
+                if action == "inscription":
+                    res, erreur = compte_inscrire(d.get("pseudo"), d.get("mdp"), d.get("donnees"))
+                else:
+                    res, erreur = compte_connecter(self, d.get("pseudo"), d.get("mdp"))
+                if not res:
+                    return self._json({"ok": False, "erreur": erreur}, 400)
+                compte, valeur = res
+                return self._json({"ok": True, "pseudo": compte["pseudo"], "donnees": compte.get("donnees") or {}},
+                                  cookie=_cookie(self, valeur, 365 * 86400))
+            compte, fichier, jeton = _session(self)
+            if action == "deconnexion":
+                if compte:
+                    with _verrou_comptes:
+                        frais = _lire_ou(fichier, None)
+                        if frais:
+                            (frais.get("sessions") or {}).pop(_empreinte(jeton), None)
+                            _ecrire(fichier, frais)
+                return self._json({"ok": True}, cookie=_cookie(self, "", 0))
+            if action == "hote":
+                # le compte de l'hote ne se declare que depuis sa machine
+                if not compte or not est_machine_hote(self):
+                    return self._json({"ok": False, "erreur": "depuis la machine de l'hote seulement"}, 403)
+                actif = bool(d.get("actif"))
+                with _verrou_comptes:
+                    frais = _lire_ou(fichier, None)
+                    if not frais:
+                        return self._json({"ok": False, "erreur": "non connecte"}, 401)
+                    if actif: frais["hote"] = True
+                    else: frais.pop("hote", None)
+                    _ecrire(fichier, frais)
+                iid = (frais.get("donnees") or {}).get("inviteId")
+                n = _deplacer_votes(iid, vers_hote=True) if actif and isinstance(iid, str) and INVITE.match(iid) else 0
+                return self._json({"ok": True, "deplaces": n})
+            if action == "votes":
+                # les votes donnes sans compte dans ce navigateur rejoignent le compte
+                ancien = d.get("ancien")
+                iid = ((compte or {}).get("donnees") or {}).get("inviteId")
+                if not compte or not isinstance(ancien, str) or not INVITE.match(ancien) or not isinstance(iid, str):
+                    return self._json({"ok": False, "erreur": "votes"}, 400)
+                if ancien == iid:
+                    return self._json({"ok": True, "deplaces": 0})
+                n = _deplacer_votes(ancien, vers_hote=bool(compte.get("hote")), nouveau=iid)
+                return self._json({"ok": True, "deplaces": n})
+            if action == "sauver":
+
+                if not compte:
+                    return self._json({"ok": False, "erreur": "non connecte"}, 401)
+                if not isinstance(d.get("donnees"), dict):
+                    return self._json({"ok": False, "erreur": "donnees"}, 400)
+                with _verrou_comptes:
+                    frais = _lire_ou(fichier, None)
+                    if not frais:
+                        return self._json({"ok": False, "erreur": "non connecte"}, 401)
+                    frais["donnees"] = d["donnees"]
+                    frais["maj"] = int(time.time())
+                    _ecrire(fichier, frais)
+                return self._json({"ok": True})
+        except OSError:
+            return self._json({"ok": False, "erreur": "écriture impossible"}, 500)
+        self.send_error(404)
+
 
     def send_head(self):
         if not self.autorise():

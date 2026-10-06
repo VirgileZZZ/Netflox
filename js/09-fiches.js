@@ -117,7 +117,7 @@ function paintCats(a){
   inp.addEventListener('change', add);   // choix dans la liste déroulante
 }
 
-function renderHero(a, resumeEp){
+function renderHero(a, resumeEp, kicker){
   if (!a){ $('#hero').innerHTML = ''; return; }
   const ep = resumeEp || nextUnwatched(a);
   const p  = ep ? getProgress(ep) : null;
@@ -125,7 +125,8 @@ function renderHero(a, resumeEp){
   $('#hero').innerHTML =
     '<div class="hero-bg">' + artTag(a) + '</div>' +
     '<div class="hero-in">' +
-      '<div class="hero-kicker">' + (resumeEp ? 'On reprend ?' : 'À la une sur Netflox')
+      '<div class="hero-kicker">' + esc(resumeEp ? 'On reprend ?' : kicker || 'À la une sur Netflox')
+
  + '</div>' +
       '<h1>' + esc(a.title) + '</h1>' +
       '<div class="hero-meta">' +
@@ -260,11 +261,14 @@ function rateHTML(cible){
 function noteBoxHTML(a){
   const c = noteCible('s:' + a.key);
   if (S.shared && !S.peutNoter && !c.note) return '';
-  const dit = noteDetail(c);
-  const detail = (!S.shared || S.peutNoter) && !c.perso
-    ? (dit ? dit + ' \u2014 clique pour donner la tienne'
-           : 'Clique sur une \u00e9toile pour noter')
-    : dit;
+  /* A cote des etoiles, trois mots: le detail des voix est long, il reste
+     au survol des etoiles (leur title). */
+  const peut = !S.shared || S.peutNoter;
+  const hote = !S.shared || S.estHote;
+  const detail = c.perso ? (hote ? 'Ma note ' : 'Ta note ') + fmtNote(c.perso)
+               : peut ? 'Clique pour noter'
+               : c.auto && c.note ? 'Moyenne des \u00e9pisodes' : '';
+
   return '<div class="ratebox" data-notebox="' + esc(a.key) + '">' +
     '<span class="lab">Note</span>' +
     rateHTML('s:' + a.key) +

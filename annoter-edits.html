@@ -123,6 +123,13 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent2);outlin
 .ep.vu::after{content:'';position:absolute;top:5px;right:5px;width:5px;height:5px;border-radius:50%;background:var(--ok)}
 .ep.avant{background:rgba(255,77,141,.12);border-color:rgba(255,77,141,.25)}
 .ep.on{background:var(--accent2);border-color:var(--accent2);color:#fff}
+/* combien d'edits sont deja ranges sur cet episode */
+.ep .nb,.nb-ex{position:absolute;top:-6px;left:-6px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;
+  background:var(--accent);color:#fff;font-size:.62rem;font-weight:800;line-height:17px;text-align:center}
+.nb-ex{position:static;display:inline-block;margin-right:6px}
+.aucun.suite.on{border-color:var(--accent2);background:rgba(255,77,141,.14)}
+.voir{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--muted)}
+.voir select{flex:1;max-width:340px;padding:7px 10px;border-radius:9px;border:1px solid var(--line2);background:var(--card);color:var(--text);font:inherit;font-size:.84rem}
 .legende-ep{font-size:.72rem;color:var(--dim);display:flex;gap:12px;flex-wrap:wrap}
 .legende-ep i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:5px;vertical-align:middle}
 .effacer{align-self:flex-start;font-size:.8rem;color:var(--muted);padding:6px 10px;border-radius:8px;border:1px solid var(--line2)}
@@ -200,6 +207,7 @@ kbd{font-family:ui-monospace,Consolas,monospace;font-size:.7rem;padding:1px 5px;
       <label class="case"><input type="checkbox" id="auto" checked> Passer au suivant après un choix</label>
       <label class="case"><input type="checkbox" id="afaire"> Seulement ceux à faire</label>
     </div>
+    <label class="voir">Voir <select id="voir"></select></label>
     <div class="pellicule" id="pellicule"></div>
   </section>
 
@@ -209,11 +217,12 @@ kbd{font-family:ui-monospace,Consolas,monospace;font-size:.7rem;padding:1px 5px;
     <div class="actuel" id="actuel"></div>
     <button class="aucun" id="aucun">Aucun spoil<small>Visible tout de suite, même sans avoir commencé la série</small></button>
     <div id="saisons"></div>
-    <div class="legende-ep"><span><i></i>déjà vu</span></div>
+    <button class="aucun suite" id="suite">Suite<small>Va plus loin que le dernier épisode que tu as : reste caché, même la série finie</small></button>
+    <div class="legende-ep"><span><i></i>déjà vu</span><span><b class="nb-ex">3</b>edits annotés sur cet épisode</span></div>
     <button class="effacer" id="effacer">Retirer l'annotation</button>
     <div class="touches">
       <kbd>←</kbd> <kbd>→</kbd> edit précédent / suivant · <kbd>Espace</kbd> pause · <kbd>M</kbd> son<br>
-      <kbd>0</kbd> aucun spoil · <kbd>Suppr</kbd> retirer l'annotation
+      <kbd>0</kbd> aucun spoil · <kbd>S</kbd> suite · <kbd>Suppr</kbd> retirer l'annotation
     </div>
   </aside>
 </main>
@@ -446,9 +455,38 @@ $('#series').addEventListener('click', (ev) => {
   if (b && !b.disabled) choisirSerie(b.dataset.serie);
 });
 
+/* « Voir »: tous les edits, ceux a faire, ou ceux ranges sur un episode
+   precis — pour retrouver ce qu'on a mis a S1E14 et le corriger. */
+function voirFiltre(a, e){
+  const f = A.voir || '', v = annotation(a, e);
+  return !f || (f === '-' ? !v : v === f);
+}
+function visibles(){ const a = A.serie; return a.edits.map((e, k) => k).filter(k => voirFiltre(a, a.edits[k])); }
+function peindreVoir(){
+  const a = A.serie, compte = {};
+  for (const e of a.edits){ const v = annotation(a, e) || '-'; compte[v] = (compte[v] || 0) + 1; }
+  const opt = (val, txt) => '<option value="' + esc(val) + '"' + ((A.voir || '') === val ? ' selected' : '') + '>' + esc(txt) + '</option>';
+  let html = opt('', 'Tous les edits (' + a.edits.length + ')') + opt('-', 'À faire (' + (compte['-'] || 0) + ')');
+  if (compte.aucun) html += opt('aucun', 'Aucun spoil (' + compte.aucun + ')');
+  for (const ep of a.episodes){
+    const c = court(a, ep);
+    if (compte[c]) html += opt(c, nomEpisode(a, c, true) + ' (' + compte[c] + ')');
+  }
+  if (compte.suite) html += opt('suite', 'Suite (' + compte.suite + ')');
+  // un filtre qui ne garde plus rien retombe sur « tous »
+  if (A.voir && !compte[A.voir === '-' ? '-' : A.voir]){ A.voir = ''; return peindreVoir(); }
+  $('#voir').innerHTML = html;
+}
+$('#voir').addEventListener('change', () => {
+  A.voir = $('#voir').value;
+  const l = visibles();
+  if (l.length && !l.includes(A.i)){ A.i = l[0]; }
+  montrer();
+});
 function choisirSerie(key){
   A.serie = A.series.find(a => a.key === key) || null;
   if (!A.serie) return;
+  A.voir = '';
   const premier = A.serie.edits.findIndex(e => !annotation(A.serie, e));
   A.i = premier >= 0 ? premier : 0;
   peindreSeries();
@@ -461,7 +499,7 @@ function peindreSaisons(){
     '<div class="saison"><h4>' + esc(s.label || 'Épisodes') + '</h4><div class="grille">' +
     s.eps.map((ep, k) => {
       const n = ep.ep != null ? ep.ep : k + 1;
-      return '<button class="ep" data-ep="' + esc(court(a, ep)) + '" title="' + esc((s.label ? s.label + ' · ' : '') + 'Épisode ' + n + (ep.title ? ' — ' + ep.title : '')) + '">' + n + '</button>';
+      return '<button class="ep" data-ep="' + esc(court(a, ep)) + '" title="' + esc((s.label ? s.label + ' · ' : '') + 'Épisode ' + n + (ep.title ? ' — ' + ep.title : '')) + '">' + n + '<span class="nb" hidden></span></button>';
     }).join('') + '</div></div>').join('');
 }
 $('#saisons').addEventListener('click', (ev) => {
@@ -469,13 +507,16 @@ $('#saisons').addEventListener('click', (ev) => {
   if (b) annoter(b.dataset.ep);
 });
 $('#aucun').addEventListener('click', () => annoter('aucun'));
+$('#suite').addEventListener('click', () => annoter('suite'));
 $('#effacer').addEventListener('click', () => annoter(''));
 
-function nomEpisode(a, c){
+function nomEpisode(a, c, court_){
+  if (c === 'suite') return 'la suite, après le dernier épisode';
   const ep = a.episodes.find(e => court(a, e) === c);
   if (!ep) return 'un épisode qui n\'est plus sur le disque';
   const s = a.seasonList.find(x => x.key === ep.seasonKey);
   const n = ep.ep != null ? ep.ep : s.eps.indexOf(ep) + 1;
+  if (court_) return (s && s.label ? s.label + ' · ' : '') + 'Ép. ' + n;
   return (s && s.label ? s.label + ' · ' : '') + 'épisode ' + n + (ep.title && !/^épisode/i.test(ep.title) ? ' — ' + ep.title : '');
 }
 function peindreEdit(){
@@ -485,23 +526,31 @@ function peindreEdit(){
   $('#fich').textContent = e.name;
   const etat = $('#etat');
   etat.className = 'etat' + (v === 'aucun' ? ' libre' : v ? ' ok' : '');
-  etat.textContent = v === 'aucun' ? 'Aucun spoil' : v ? 'Annoté' : 'À faire';
+  etat.textContent = v === 'aucun' ? 'Aucun spoil' : v === 'suite' ? 'Suite' : v ? 'Annoté' : 'À faire';
   $('#actuel').innerHTML = v === 'aucun' ? '<b>Aucun spoil</b> : visible tout de suite.'
+    : v === 'suite' ? 'Montre <b>la suite</b>, après le dernier épisode : caché même la série finie.'
     : v ? 'Montre jusqu\'à <b>' + esc(nomEpisode(a, v)) + '</b>.'
     : 'Pas encore annoté : il reste masqué tant que la série n\'est pas finie.';
-  $('#pos').textContent = (A.i + 1) + ' / ' + a.edits.length;
+  const l = visibles(), pos = l.indexOf(A.i);
+  $('#pos').textContent = A.voir ? (pos + 1) + ' / ' + l.length : (A.i + 1) + ' / ' + a.edits.length;
   $('#aucun').classList.toggle('on', v === 'aucun');
+  $('#suite').classList.toggle('on', v === 'suite');
   // la place de chaque episode par rapport au choix: avant lui, c'est ce qu'il faut avoir vu
-  const rang = v && v !== 'aucun' ? a.episodes.findIndex(x => court(a, x) === v) : -1;
+  const rang = v === 'suite' ? a.episodes.length : v && v !== 'aucun' ? a.episodes.findIndex(x => court(a, x) === v) : -1;
+  const parEp = {};
+  for (const x of a.edits){ const w = annotation(a, x); if (w) parEp[w] = (parEp[w] || 0) + 1; }
   for (const b of document.querySelectorAll('#saisons [data-ep]')){
     const ep = a.episodes.find(x => court(a, x) === b.dataset.ep);
     const pg = ls.get('pg.' + ep.rel, null);
     b.classList.toggle('vu', !!(pg && pg.done));
     b.classList.toggle('on', b.dataset.ep === v);
     b.classList.toggle('avant', rang >= 0 && ep.idx < rang);
+    const nb = b.querySelector('.nb'), n = parEp[b.dataset.ep] || 0;
+    nb.hidden = !n; nb.textContent = n;
   }
-  $('#pellicule').innerHTML = a.edits.map((x, k) =>
-    '<button data-i="' + k + '" class="' + (annotation(a, x) ? 'ok' : '') + (k === A.i ? ' on' : '') + '" title="' + esc(x.title) + '">' + (k + 1) + '</button>').join('');
+  peindreVoir();
+  $('#pellicule').innerHTML = l.map(k => { const x = a.edits[k];
+    return '<button data-i="' + k + '" class="' + (annotation(a, x) ? 'ok' : '') + (k === A.i ? ' on' : '') + '" title="' + esc(x.title) + '">' + (k + 1) + '</button>'; }).join('');
   const sel = $('#pellicule .on');
   if (sel) sel.scrollIntoView({ block:'nearest', inline:'center' });
 }
@@ -548,6 +597,13 @@ $('#son').addEventListener('click', basculerSon);
 function suivant(d, apresChoix){
   const a = A.serie;
   if (!a) return;
+  // en revue d'un episode (« Voir »), on avance dans sa liste, annote ou non
+  if (A.voir){
+    for (let k = A.i + d; k >= 0 && k < a.edits.length; k += d)
+      if (voirFiltre(a, a.edits[k]) && (!$('#afaire').checked || !annotation(a, a.edits[k]))){ A.i = k; return montrer(); }
+    if (apresChoix) montrer();                 // l'edit a pu quitter le filtre: on repeint
+    return;
+  }
   const seulement = $('#afaire').checked || apresChoix;
   for (let k = A.i + d; k >= 0 && k < a.edits.length; k += d){
     if (!seulement || !annotation(a, a.edits[k])){ A.i = k; return montrer(); }
@@ -564,12 +620,15 @@ $('#prec').addEventListener('click', () => suivant(-1));
 $('#suiv').addEventListener('click', () => suivant(1));
 
 addEventListener('keydown', (ev) => {
-  if (!A.serie || ev.target.matches('input')) return;
+  if (!A.serie || ev.target.matches('input,select')) return;
+
   if (ev.key === 'ArrowRight'){ ev.preventDefault(); suivant(1); }
   else if (ev.key === 'ArrowLeft'){ ev.preventDefault(); suivant(-1); }
   else if (ev.key === ' '){ ev.preventDefault(); basculer(); }
   else if (ev.key.toLowerCase() === 'm'){ basculerSon(); }
   else if (ev.key === '0'){ annoter('aucun'); }
+  else if (ev.key.toLowerCase() === 's'){ annoter('suite'); }
+
   else if (ev.key === 'Delete' || ev.key === 'Backspace'){ ev.preventDefault(); annoter(''); }
 });
 

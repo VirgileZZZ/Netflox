@@ -123,3 +123,6 @@ Desktop.ini:encryptable
 *.exe
 *.dll
 *.so
+
+# --- Comptes des invites: empreintes de mots de passe, sessions ---
+comptes/

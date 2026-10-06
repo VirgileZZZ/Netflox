@@ -137,17 +137,91 @@ function langHint(lang, subs){
   return lang;
 }
 
+/* --------------------------------------------- recommandations ------
+ * Ce qu'on a regarde dit ce qu'on aime. Chaque serie entamee donne du poids
+ * a ses categories: d'autant plus qu'on en a vu d'episodes (plein a douze),
+ * que c'est recent (demi-vie de deux mois) et qu'on l'a bien notee — une
+ * serie notee sous 5 fait baisser les siennes. Les poids sont ramenes a 1
+ * pour la categorie preferee.
+ */
+const RECO_PLEIN = 12, RECO_DEMI_VIE = 60;
+function goutsCategories(){
+  const poids = {}, maintenant = Date.now();
+  for (const a of S.animes){
+    if (!a.episodes.length) continue;
+    let vus = 0, dernier = 0;
+    for (const e of a.episodes){
+      const p = getProgress(e);
+      if (!p) continue;
+      if (p.done) vus += 1; else if (p.t > 120) vus += .5;
+      if (p.at > dernier) dernier = p.at;
+    }
+    if (!vus) continue;
+    const engagement = Math.min(1, vus / Math.min(a.episodes.length, RECO_PLEIN));
+    const recence = Math.pow(.5, (maintenant - dernier) / 86400000 / RECO_DEMI_VIE);
+    const c = noteCible('s:' + a.key), avis = c.perso || c.note;
+    const gout = avis ? Math.max(-1, Math.min(1, (avis - 5) / 4)) : .5;
+    const w = engagement * (.4 + .6 * recence) * gout;
+    const cats = catsOf(a.key);
+    for (const k of cats) poids[k] = (poids[k] || 0) + w / Math.sqrt(cats.length);
+  }
+  const max = Math.max(0, ...Object.values(poids));
+  if (max > 0) for (const k in poids) poids[k] /= max;
+  return poids;
+}
+/* Les series a recommander: pas commencees, ou a peine (moins d'un tiers
+ * vu — au-dela, elles sont dans « Reprendre »). Leur score: ce que leurs
+ * categories partagent avec nos gouts, plus un peu de leur note. Sans
+ * historique, il ne reste que la note: les mieux notees d'abord. */
+function recommandations(){
+  const poids = goutsCategories();
+  const perso = Object.values(poids).some(w => w > 0);
+  const liste = [];
+  for (const a of videoSeries()){
+    if (!a.episodes.length) continue;
+    const vus = a.episodes.filter(e => (getProgress(e) || {}).done).length;
+    if (vus / a.episodes.length > 1 / 3) continue;
+    const cats = catsOf(a.key);
+    const affinite = cats.reduce((s, k) => s + Math.max(0, poids[k] || 0), 0) / Math.sqrt(cats.length || 1);
+    const note = noteCible('s:' + a.key).note || 6;
+    const score = (perso ? affinite : 0) + (note - 6) * .12 - (vus ? .15 : 0);
+    const raisons = cats.filter(k => (poids[k] || 0) > 0).sort((x, y) => poids[y] - poids[x]).slice(0, 2);
+    liste.push({ a, score, raisons });
+  }
+  liste.sort((x, y) => y.score - x.score || naturalCompare(x.a.title, y.a.title));
+  return { liste, perso };
+}
+/* A la une: une des trois premieres, tiree avec la date du jour pour graine.
+   Elle change chaque jour, pas a chaque retour a l'accueil. */
+function choixDuJour(liste){
+  const n = Math.min(3, liste.length);
+  if (!n) return null;
+  const jour = new Date().toISOString().slice(0, 10);
+  let h = 0;
+  for (const ch of jour) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return liste[h % n];
+}
+function phraseReco(r){
+  if (!r.raisons.length) return '';
+  return 'Parce que tu aimes ' + r.raisons.join(' et ');
+}
+
 /* ----------------------------------------------------------- home --- */
 function renderHome(){
   const view = $('#view-home'); view.hidden = false;
   const cont = continueList();
-  const firstEp = cont.find(c => c.kind === 'ep');       // la bannière reste une vidéo
   const vids  = videoSeries();
-  const heroA = (firstEp && S.byKey.get(firstEp.anime)) || favList().find(hasVideo) || vids[0];
-  renderHero(heroA, firstEp && firstEp.ep);
+  const reco = recommandations();
+  const une = choixDuJour(reco.liste);
+  const heroA = (une && une.a) || favList().find(hasVideo) || vids[0];
+  renderHero(heroA, null, !une ? '' : reco.perso ? phraseReco(une) || 'À la une sur Netflox' : 'Les mieux notées de Netflox');
+
 
   const rows = [];
   if (cont.length) rows.push({ title:'Reprendre', sub:'là où tu t\'es arrêté', items: cont, resume:true });
+  if (reco.liste.length > 1) rows.push({ title:'Pour toi', poster:true, items: reco.liste.slice(0, 12).map(r => r.a),
+    sub: reco.perso ? 'd’après ce que tu regardes' : 'les mieux notées, en attendant de te connaître' });
+
   const favs = favList().filter(hasVideo);
   if (favs.length) rows.push({ title:'Mes favoris', sub: fmtCount(favs.length,'série','séries'), items: favs, poster:true });
   const rec = recentList();

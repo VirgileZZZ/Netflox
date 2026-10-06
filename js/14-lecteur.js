@@ -310,7 +310,10 @@ async function openPlayer(ep){
   S.switching = false;
 
   const p = getProgress(ep);
-  const seekTo = p && !p.done && p.t > 20 ? p.t : 0;
+  // reprendre ou l'on s'etait arrete, meme sur un episode deja vu; arrive au
+  // bout (les 15 dernieres secondes), on repart du debut
+  const seekTo = p && p.t > 20 && (!p.d || p.t < p.d - 15) ? p.t : 0;
+
   const start = () => {
     if (S.current !== ep) return;                 // un autre épisode a été lancé entre-temps
     if (seekTo) { try { V.currentTime = seekTo; } catch(e){} }

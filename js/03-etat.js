@@ -75,13 +75,20 @@ function trimThumbs(){
 }
 const progressKey = (ep) => 'pg.' + ep.rel;
 function getProgress(ep){ return store.get(progressKey(ep), null); }
+/* Vu a 90 %: ce qui reste, c'est surtout le generique. La position, elle,
+   reste ou l'on s'est arrete — un episode vu a 90 % se rouvre a 90 %, pas au
+   debut. Et un episode vu le reste: le revoir depuis le debut ne l'efface
+   plus (avant, quelques secondes suffisaient a le remettre « en cours », et
+   ses edits se recachaient). Seul « Marquer comme non vu » le retire. */
+const SEUIL_VU = 0.90;
 function setProgress(ep, t, d){
   if (!d || !isFinite(d)) return;
-  const pct = t / d;
-  if (pct > 0.94 || t < 12){ store.set(progressKey(ep), { t: pct > 0.94 ? d : 0, d, done: pct > 0.94, at: Date.now() }); }
-  else store.set(progressKey(ep), { t, d, done: false, at: Date.now() });
+  const avant = getProgress(ep);
+  const done = t / d >= SEUIL_VU || !!(avant && avant.done);
+  store.set(progressKey(ep), { t: t < 12 ? 0 : t, d, done, at: Date.now() });
   touched(ep.anime);
 }
+
 
 /* Scans et textes retiennent une position et sa date, comme les vidéos: les
    trois médias peuvent alors être triés ensemble dans « Reprendre ».

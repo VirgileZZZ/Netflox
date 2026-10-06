@@ -577,8 +577,11 @@ function filtrerSpoils(edits){
       series.set(a.key, s);
     }
     const v = spoils[e.rel];
-    // un episode disparu du disque: on ne sait plus, on suppose le pire
-    const jusque = v === 'aucun' ? -1 : (v && s.rang.has(v) ? s.rang.get(v) : s.fin);
+    // « suite »: plus loin que le dernier episode qu'on a — cache meme la serie
+    // finie. Un episode disparu du disque: on ne sait plus, on suppose le pire.
+    const jusque = v === 'aucun' ? -1 : v === 'suite' ? Infinity
+                 : (v && s.rang.has(v) ? s.rang.get(v) : s.fin);
+
     place.set(e.rel, { jusque, vu: s.vu });
     if (jusque <= s.vu) garder.push(e); else caches++;
   }
@@ -610,16 +613,38 @@ function paintEdSpoil(caches){
   b.title = edSpoilsVisibles ? 'Remasquer les edits qui spoilent la suite'
     : caches ? 'Afficher aussi les edits qui spoilent la suite' : 'Aucun edit ne spoile ce que tu as vu';
 }
+/* Basculer les spoilers ne rebat pas le fil: rebattre placait l'edit a
+ * l'ecran n'importe ou dans le nouvel ordre, souvent tout en bas. Ce qui est
+ * deja passe et l'edit en cours gardent leur place. Les edits devoiles se
+ * melent a la suite seulement; masques, ils sont retires, sans rien remuer —
+ * et si l'on etait sur l'un d'eux, on passe au suivant encore permis. */
 function edBasculerSpoils(){
   if (!edCtx) return;
   edSpoilsVisibles = !edSpoilsVisibles;
-  const courant = edCtx.list[edCtx.i];
+  const avant = edCtx.list, i = Math.max(0, edCtx.i), courant = avant[i];
+  const tri = filtrerSpoils(edCtx.tous);
+  let list;
+  if (edSpoilsVisibles){
+    const deja = new Set(avant.map(e => e.rel));
+    const devoiles = edCtx.tous.filter(e => !deja.has(e.rel));
+    let suite = fileEdits(avant.slice(i + 1).concat(devoiles), edVus(), edContexte()).list;
+    if (edCtx.priorite) suite = prioriserDebloques(suite, tri.place);
+    list = avant.slice(0, i + 1).concat(suite);
+  } else {
+    const permis = new Set(tri.garder.map(e => e.rel));
+    list = avant.filter(e => permis.has(e.rel));
+  }
+  // la meme place: l'edit en cours, sinon le premier encore la apres lui
+  let j = courant ? list.findIndex(e => e.rel === courant.rel) : -1;
+  for (let k = i + 1; j < 0 && k < avant.length; k++) j = list.findIndex(e => e.rel === avant[k].rel);
+  if (j < 0) j = list.length - 1;
   edDwellFin();
   edStatsEcrire();
   clearTimeout(edCibleT); edCible = null;
   clearTimeout(edVuT);
   edFree(new Set());
-  edOuvrir(edCtx.tous, edCtx.defaut, 0, courant && courant.rel, edCtx.priorite);
+  edCtx.list = list; edCtx.i = -1;
+  edRendre(edSpoilsVisibles ? 0 : tri.caches, Math.max(0, j));
 }
 /**
  * Le nom de l'œuvre, en haut à gauche. Dans le fil global il change à chaque
@@ -639,15 +664,22 @@ function edOuvrir(edits, defaut, depart, garderRel, priorite){
   if (edSpoilsVisibles){ tri.garder = edits; tri.caches = 0; }
   const file = fileEdits(tri.garder, edVus(), edContexte());
   if (priorite) file.list = prioriserDebloques(file.list, tri.place);
-  const revus = file.list.length - file.neufs;
   edCtx = { list: file.list, i: -1, defaut, tous, priorite: !!priorite };
-  paintEdSpoil(tri.caches);
   ED.hidden = false;
   document.body.style.overflow = 'hidden';
+  const garde = garderRel ? edCtx.list.findIndex(e => e.rel === garderRel) : -1;
+  edRendre(tri.caches, garde >= 0 ? garde : depart | 0);
+}
+/** Dessine le fil de edCtx.list et se place sur la diapo `start`. */
+function edRendre(caches, start){
+  const vus = edVus();
+  const neufs = edCtx.list.filter(e => !vus[e.rel]).length;
+  const revus = edCtx.list.length - neufs;
+  paintEdSpoil(caches);
   edPeindreNom(null);
-  $('#edSub').textContent = fmtCount(file.list.length, 'edit', 'edits') +
-    (!revus ? '' : file.neufs ? ' · ' + file.neufs + ' nouveau' + (file.neufs > 1 ? 'x' : '') + ' en tête'
-                              : ' · tous déjà vus');
+  $('#edSub').textContent = fmtCount(edCtx.list.length, 'edit', 'edits') +
+    (!revus ? '' : neufs ? ' · ' + neufs + ' nouveau' + (neufs > 1 ? 'x' : '') + ' en tête'
+                         : ' · tous déjà vus');
   if (!edCtx.list.length){
     // tout spoile la suite: le fil s'ouvre quand meme, pour le bouton du haut
     $('#edCount').textContent = '0 / 0';
@@ -668,11 +700,10 @@ function edOuvrir(edits, defaut, depart, garderRel, priorite){
   paintEdMute();
   paintEdRate();
   paintEdAime(false);
-  const garde = garderRel ? edCtx.list.findIndex(e => e.rel === garderRel) : -1;
-  const start = garde >= 0 ? garde : Math.max(0, Math.min(edCtx.list.length - 1, depart | 0));
-  edGo(start, false);
+  edGo(Math.max(0, Math.min(edCtx.list.length - 1, start | 0)), false);
   edObserve();
 }
+
 function closeEdits(){
   edDwellFin();
   edStatsEcrire();
@@ -772,19 +803,34 @@ function edPlay(i){
   }
   const v = edVideo(i);
   if (!v || !v.getAttribute('src')) return;
-  v.muted = edMuted();
+  v.muted = edMuted() || edMuetForce;
   v.volume = edVolumeDe(edCtx.list[i]);
   v.playbackRate = edRate();
-  v.play().catch(() => {
-    // le navigateur refuse le son tant qu'on n'a rien touche: on repart muet
-    if (v.muted) return;
+  v.play().catch((err) => {
+    /* Seul un refus du navigateur (NotAllowedError: pas encore de geste sur la
+       page) demande de repartir muet. Defiler vite, lui, interrompt le play()
+       en cours (AbortError): rien a voir avec le son. Les deux etaient
+       confondus, et le son se coupait — pour de bon, puisque c'etait retenu. */
+    if (!err || err.name !== 'NotAllowedError' || v.muted) return;
     v.muted = true;
-    store.set('edMute', true);
+    edMuetForce = true;                         // pour ce passage seulement, pas retenu
     paintEdMute();
     $('#edHint').hidden = false;
     v.play().catch(() => {});
   });
 }
+/* Muet impose par le navigateur: le premier geste sur la page le leve, et le
+   son revient sur l'edit en cours si l'on n'avait pas soi-meme coupe le son. */
+let edMuetForce = false;
+['pointerdown', 'keydown'].forEach(t => addEventListener(t, (ev) => {
+  // le haut-parleur gere lui-meme ce cas: sinon on rallumerait ici, et son clic recouperait
+  if (!edMuetForce || (ev.target.closest && ev.target.closest('#edMute'))) return;
+  edMuetForce = false;
+  $('#edHint').hidden = true;
+  const v = edCtx && edVideo(edCtx.i);
+  if (v && !edMuted()) v.muted = false;
+  paintEdMute();
+}, true));
 function edToggle(){
   if (!edCtx) return;
   const v = edVideo(edCtx.i);
@@ -820,7 +866,8 @@ function paintEdAime(anime){
   }
 }
 function paintEdMute(){
-  const muet = edMuted() || edVolume() === 0;
+  const muet = edMuted() || edMuetForce || edVolume() === 0;
+
   const b = $('#edMute');
   b.innerHTML = muet ? SVG_MUET : SVG_SON;
   b.setAttribute('aria-label', muet ? 'Activer le son' : 'Couper le son');
@@ -834,7 +881,8 @@ $('#edSpoil').addEventListener('click', edBasculerSpoils);
 
 $('#edJaime').addEventListener('click', edBasculerAime);
 $('#edMute').addEventListener('click', () => {
-  store.set('edMute', !edMuted());
+  if (edMuetForce) edMuetForce = false;          // muet impose: ce clic rallume, il ne coupe pas
+  else store.set('edMute', !edMuted());
   paintEdMute();
   $('#edHint').hidden = true;
   const v = edCtx ? edVideo(edCtx.i) : null;

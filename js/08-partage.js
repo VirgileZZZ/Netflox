@@ -69,6 +69,8 @@ async function demanderQuiJeSuis(){
     S.peutNoter = true;
     S.estHote = d.hote;
     majNotes();
+    compteAuDemarrage(d);
+
   } catch(e){}
 }
 /** Une note posee depuis un lien de partage part chez l'hote. On l'affiche
