@@ -295,8 +295,16 @@ def a_identifier(videos, series):
         chemin = os.path.join(videos, dossier)
         if dossier in series or not os.path.isdir(chemin):
             continue
-        if not episodes_locaux(chemin):
+        eps = episodes_locaux(chemin)
+        if not eps:
             continue                              # que des edits: rien a noter
+        # Des films, sans saison: aucune grille d'episodes ou les ranger, et la
+        # seule preuve restante — la note de l'oeuvre — ne vaut rien ici. Le
+        # Hobbit, note 7,7 (la moyenne de ses films), etait sorti « The Vampire
+        # Diaries ». Leurs notes se posent a la main, film par film.
+        if not any(saison_episode(r) for r in eps):
+            continue
+
         # « mushoku-tensei-720p-vostfr » -> « mushoku tensei »
         propre = re.sub(r"[-_]?(720p|1080p|480p|2160p|vostfr|vf|vo|multi)\b", " ",
                         dossier, flags=re.I)

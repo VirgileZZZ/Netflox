@@ -27,6 +27,7 @@ import urllib.parse
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANIFESTE = "bibliotheque-index.json"
 ACCOMPAGNEMENT = "bibliotheque.json"            # depose par la page dans chaque serie
+NOTES_INVITES = "notes-invites.json"            # les notes des invites, a part: ils n'ecrivent jamais dans le fichier de l'hote
 DOSSIERS_MEDIA = ("videos", "video")
 
 VIDEO_EXT = {"mp4", "m4v", "webm", "mov", "mkv", "ts", "m2ts", "avi", "flv", "ogv"}
@@ -39,17 +40,21 @@ MEDIA_EXT = VIDEO_EXT | IMAGE_EXT | DOC_EXT
 # pistes. Elles ne figuraient pas au manifeste — servables mais jamais listees,
 # donc invisibles pour l'invite, qui se retrouvait sans choix de langue ni de
 # sous-titres. Elles ne comptent que dans un dossier prevu pour, sous une
-# saison: la meme regle que la page applique de son cote.
+# saison ou directement sous la serie (un film n'a pas de saison): la meme
+# regle que la page applique de son cote.
 DOSSIERS_COTE = {"sous-titres", "sous titres", "subs", "subtitles", "audio", "pistes"}
 SUB_EXT = {"vtt"}
 AUD_EXT = {"m4a", "mp3", "aac", "opus", "ogg", "wav"}
 
 
 def est_cote(rel, ext):
-    """rel est le chemin sous videos/. Il faut au moins serie/saison/dossier."""
+    """rel est le chemin sous videos/: serie/[saison/]dossier/fichier.
+    Exiger une saison laissait Le Hobbit et Le Seigneur des Anneaux sans
+    sous-titres ni VF une fois partages."""
     parts = rel.split("/")
-    if len(parts) < 4:
+    if len(parts) < 3:
         return False
+
     if parts[-2].lower() not in DOSSIERS_COTE:
         return False
     return ext in (SUB_EXT | AUD_EXT)
@@ -147,7 +152,102 @@ def lire_accompagnement(chemin):
                 propre[rel] = {"start": a, "end": b}
         if propre:
             fiche[champ] = propre
+    # jusqu'ou chaque edit montre l'histoire: sans elles, l'invite ne verrait
+    # aucun edit tant qu'il n'a pas fini la serie
+    spoils = d.get("spoil_edits")
+    if isinstance(spoils, dict):
+        propre = {k: v for k, v in spoils.items() if isinstance(k, str) and isinstance(v, str) and v}
+        if propre:
+            fiche["spoil_edits"] = propre
     return fiche or None
+
+
+def _note_valide(v):
+    """Une note de 1 a 10, au dixieme. None pour tout le reste."""
+    if isinstance(v, bool):
+        return None
+    try:
+        n = round(float(v), 1)
+    except (TypeError, ValueError):
+        return None
+    return n if 1 <= n <= 10 else None
+
+
+def _votes(d):
+    if not isinstance(d, dict):
+        return {}
+    out = {}
+    for qui, v in d.items():
+        n = _note_valide(v)
+        if isinstance(qui, str) and n:
+            out[qui] = n
+    return out
+
+
+def lire_notes_invites(dossier):
+    """{"serie": {invite: note}, "episodes": {chemin: {invite: note}}}, nettoye."""
+    try:
+        with open(os.path.join(dossier, NOTES_INVITES), encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    propre = {}
+    serie = _votes(d.get("serie"))
+    if serie:
+        propre["serie"] = serie
+    eps = {}
+    for rel, votes in (d.get("episodes") or {}).items() if isinstance(d.get("episodes"), dict) else []:
+        v = _votes(votes)
+        if isinstance(rel, str) and v:
+            eps[rel] = v
+    if eps:
+        propre["episodes"] = eps
+    return propre or None
+
+
+def fiche_serie(dossier):
+    """Ce que la page recoit d'une serie: la fiche de l'hote et les notes des invites."""
+    fiche = None
+    chemin = os.path.join(dossier, ACCOMPAGNEMENT)
+    if os.path.isfile(chemin):
+        fiche = lire_accompagnement(chemin)
+    invites = lire_notes_invites(dossier)
+    if invites:
+        fiche = dict(fiche or {})
+        fiche["notes_invites"] = invites
+    return fiche
+
+
+_verrou_index = threading.Lock()
+def rafraichir_fiches():
+    """Les fiches bougent pendant que le partage tourne: une note, une
+    categorie, des edits annotes. On les relit a chaque demande de l'index —
+    une trentaine de petits fichiers — sans reparcourir toute la bibliotheque."""
+    cible = os.path.join(RACINE, MANIFESTE)
+    with _verrou_index:
+        try:
+            with open(cible, encoding="utf-8") as f:
+                data = json.load(f)
+            base = os.path.join(RACINE, str(data.get("base", "videos/")).strip("/"))
+            series = os.listdir(base)
+        except (OSError, ValueError):
+            return
+        fiches = {}
+        for serie in series:
+            if serie.lower() in SAUTER or not os.path.isdir(os.path.join(base, serie)):
+                continue
+            fiche = fiche_serie(os.path.join(base, serie))
+            if fiche:
+                fiches[serie] = fiche
+        if fiches == data.get("fiches"):
+            return
+        data["fiches"] = fiches
+        tmp = cible + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+        os.replace(tmp, cible)
 
 
 def construire_index():
@@ -163,12 +263,13 @@ def construire_index():
     accompagnements = {}
     for dossier, sous, noms in os.walk(base):
         sous[:] = [d for d in sous if d.lower() not in SAUTER]
-        if ACCOMPAGNEMENT in noms:
+        if ACCOMPAGNEMENT in noms or NOTES_INVITES in noms:
             serie = os.path.relpath(dossier, base).replace(os.sep, "/")
             if "/" not in serie and serie != ".":   # un seul par serie, a sa racine
-                fiche = lire_accompagnement(os.path.join(dossier, ACCOMPAGNEMENT))
+                fiche = fiche_serie(dossier)
                 if fiche:
                     accompagnements[serie] = fiche
+
         for n in noms:
             ext = n.rsplit(".", 1)[-1].lower() if "." in n else ""
             chemin = os.path.join(dossier, n)
@@ -190,6 +291,118 @@ def construire_index():
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
     os.replace(tmp, cible)
     return cible, len(fichiers)
+
+
+# ----------------------------------------------------------- les notes -----
+_verrou_notes = threading.Lock()
+_ADRESSES_HOTE = None
+
+
+def est_hote(handler):
+    """L'hote, c'est cette machine. Le tunnel Cloudflare arrive lui aussi de
+    127.0.0.1, mais il signe ses requetes: une requete signee vient d'ailleurs.
+    Un telephone sur la box arrive de sa propre adresse: il note en invite."""
+    if handler.headers.get("Cf-Connecting-Ip") or handler.headers.get("Cf-Ray"):
+        return False
+    global _ADRESSES_HOTE
+    if _ADRESSES_HOTE is None:
+        a = {"127.0.0.1", "::1", adresse_locale()}
+        try:
+            a.update(socket.gethostbyname_ex(socket.gethostname())[2])
+        except OSError:
+            pass
+        _ADRESSES_HOTE = a
+    ip = handler.client_address[0]
+    if ip.startswith("::ffff:"):
+        ip = ip[7:]
+    return ip in _ADRESSES_HOTE
+
+
+def _base_media():
+    for nom in DOSSIERS_MEDIA:
+        base = os.path.join(RACINE, nom)
+        if os.path.isdir(base):
+            return base
+    return None
+
+
+def _lire_ou(chemin, defaut):
+    try:
+        with open(chemin, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else defaut
+    except (OSError, ValueError):
+        return defaut
+
+
+def _ecrire(chemin, data):
+    tmp = chemin + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, chemin)
+
+
+def noter(d, hote):
+    """Pose ou retire une note. cible: « s:serie » ou « e:serie/chemin.mp4 »,
+    note: 1 a 10, ou 0 pour retirer. L'hote ecrit dans bibliotheque.json, comme
+    depuis la page ouverte sur le dossier; un invite, sous son identifiant de
+    navigateur, dans notes-invites.json. Renvoie (ok, raison)."""
+    cible, note, invite = d.get("cible"), d.get("note"), d.get("invite")
+    if not isinstance(cible, str) or cible[:2] not in ("s:", "e:"):
+        return False, "cible"
+    n = 0 if note in (0, None) else _note_valide(note)
+    if n is None:
+        return False, "note"
+    chemin = cible[2:]
+    morceaux = chemin.split("/")
+    if not morceaux[0] or "\\" in chemin or any(m in ("", ".", "..") for m in morceaux):
+        return False, "cible"
+    base = _base_media()
+    dossier = os.path.join(base, morceaux[0]) if base else None
+    if not dossier or not os.path.isdir(dossier):
+        return False, "serie inconnue"
+    court = None
+    if cible[0] == "e":
+        court = "/".join(morceaux[1:])
+        ext = court.rsplit(".", 1)[-1].lower() if "." in court else ""
+        if not court or ext not in VIDEO_EXT or not os.path.isfile(os.path.join(dossier, *morceaux[1:])):
+            return False, "episode inconnu"
+    if not hote and (not isinstance(invite, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", invite)):
+        return False, "invite"
+
+    with _verrou_notes:
+        if hote:
+            fichier = os.path.join(dossier, ACCOMPAGNEMENT)
+            data = _lire_ou(fichier, {"version": 1, "serie": morceaux[0]})
+            if court is None:
+                if n: data["note"] = n
+                else: data.pop("note", None)
+            else:
+                t = data.get("notes_episodes") if isinstance(data.get("notes_episodes"), dict) else {}
+                if n: t[court] = n
+                else: t.pop(court, None)
+                if t: data["notes_episodes"] = t
+                else: data.pop("notes_episodes", None)
+        else:
+            fichier = os.path.join(dossier, NOTES_INVITES)
+            data = _lire_ou(fichier, {"version": 1})
+            if court is None:
+                votes = data.get("serie") if isinstance(data.get("serie"), dict) else {}
+                if n: votes[invite] = n
+                else: votes.pop(invite, None)
+                if votes: data["serie"] = votes
+                else: data.pop("serie", None)
+            else:
+                eps = data.get("episodes") if isinstance(data.get("episodes"), dict) else {}
+                votes = eps.get(court) if isinstance(eps.get(court), dict) else {}
+                if n: votes[invite] = n
+                else: votes.pop(invite, None)
+                if votes: eps[court] = votes
+                else: eps.pop(court, None)
+                if eps: data["episodes"] = eps
+                else: data.pop("episodes", None)
+        _ecrire(fichier, data)
+    return True, ""
 
 
 # -------------------------------------------------------------- serveur ----
@@ -229,10 +442,51 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # js/ porte le code de la page: sans lui l'invite recoit une coquille vide
         return premier in DOSSIERS_MEDIA or premier in ("assets", "js")
 
+    def _chemin(self):
+        return urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+
+    def _json(self, data, code=200):
+        corps = json.dumps(data).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(corps)))
+        self.end_headers()
+        self.wfile.write(corps)
+
+    def do_GET(self):
+        # qui regarde: l'hote note dans sa fiche, un invite dans celle des invites
+        if self._chemin() == "/__moi":
+            return self._json({"hote": est_hote(self)})
+        super().do_GET()
+
+    def do_POST(self):
+        if self._chemin() != "/__noter":
+            self.send_error(404)
+            return
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n <= 0 or n > 4096:
+                raise ValueError
+            d = json.loads(self.rfile.read(n).decode("utf-8"))
+            if not isinstance(d, dict):
+                raise ValueError
+        except (ValueError, UnicodeDecodeError):
+            return self._json({"ok": False, "erreur": "requete illisible"}, 400)
+        hote = est_hote(self)
+        try:
+            ok, raison = noter(d, hote)
+        except OSError:
+            ok, raison = False, "ecriture impossible"
+        self._json({"ok": ok, "erreur": raison, "hote": hote}, 200 if ok else 400)
+
     def send_head(self):
         if not self.autorise():
+
             self.send_error(404)
             return None
+        if urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).lstrip("/") == MANIFESTE:
+            rafraichir_fiches()
+
         plage = self.headers.get("Range")
         if not plage:
             return super().send_head()

@@ -53,6 +53,7 @@ async function readSidecars(){
     if (typeof data.description === 'string') setDesc(a.key, data.description);
     for (const [rel, t] of Object.entries(data.titres_episodes || {}))
       if (typeof t === 'string') setEpTitre(a.key + '/' + rel, titreUtile(t));
+    if (data.spoil_edits && typeof data.spoil_edits === 'object') setSpoilsSerie(a.key, data.spoil_edits);
     for (const [champ, prefixe] of [['generiques','intro.'], ['generiques_fin','outro.']]){
       const g = data[champ] || {};
       for (const rel of Object.keys(g)){
@@ -62,6 +63,15 @@ async function readSidecars(){
       }
     }
     if (mergeProgress(a, data.progression)) stale.push(a.key);
+  }
+  // les votes des invites, poses par le partage dans un fichier a part
+  for (const a of S.animes){
+    const dir = S.seriesDirs.get(a.key);
+    if (!dir) continue;
+    try {
+      const fh = await dir.getFileHandle('notes-invites.json');
+      adopterInvites(a.key, JSON.parse(await (await fh.getFile()).text()));
+    } catch(e){}
   }
   } finally { S.loading = false; }
   // ce que le navigateur avait de plus frais n'était pas encore sur le disque
@@ -151,6 +161,12 @@ function sidecarData(a){
     const w = epImdbOf(e.rel);   if (w) imdbEp[court] = w;
     const t = epTitreOf(e.rel);  if (t) titresEp[court] = t;
   }
+  // jusqu'ou chaque edit montre l'histoire (annoter-edits.html): a garder tel quel
+  const spoils = spoilMap(), spoilEdits = {};
+  for (const e of a.edits){
+    const v = spoils[e.rel];
+    if (typeof v === 'string' && v) spoilEdits[e.rel.slice(a.key.length + 1)] = v;
+  }
   const data = { version: 1, serie: a.key, categories: catsOf(a.key) };
   if (descOf(a.key)) data.description = descOf(a.key);
   if (noteOf(a.key)) data.note = noteOf(a.key);
@@ -160,6 +176,7 @@ function sidecarData(a){
   if (Object.keys(titresEp).length) data.titres_episodes = titresEp;
   data.generiques = generiques;
   if (Object.keys(generiques_fin).length) data.generiques_fin = generiques_fin;
+  if (Object.keys(spoilEdits).length) data.spoil_edits = spoilEdits;
   if (isFav(a.key)) data.favori = true;
   if (Object.keys(progression).length) data.progression = progression;
   return data;
@@ -169,7 +186,9 @@ function sidecarEmpty(d){
   return !d.categories.length && !Object.keys(d.generiques).length &&
          !d.generiques_fin && !d.favori && !d.progression &&
          !d.note && !d.notes_episodes && !d.note_imdb &&
-         !d.notes_episodes_imdb && !d.description && !d.titres_episodes;
+         !d.notes_episodes_imdb && !d.description && !d.titres_episodes &&
+         !d.spoil_edits;
+
 }
 async function writeSidecar(a){
   const dir = S.seriesDirs.get(a.key);

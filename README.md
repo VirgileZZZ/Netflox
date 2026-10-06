@@ -47,6 +47,7 @@ videos/
 
 | Fichier | À quoi ça sert |
 | :--- | :--- |
+| `annoter-edits.html` | Dit, pour chaque edit, jusqu'à quel épisode il montre l'histoire. Le fil d'edits ne montre ensuite que ceux qui ne spoilent rien de ce que tu n'as pas vu (bouton « Spoilers » en haut à droite pour tout voir). À ouvrir dans Chrome sur l'ordinateur des vidéos. |
 | `Convertir-Video.bat` | Convertit n'importe quelle vidéo en MP4 lisible par le navigateur (ou en MKV pour archiver). Glisser-déposer des fichiers ou des dossiers dessus. |
 | `download-all-seasons.bat` | Télécharge toutes les saisons d'un anime depuis une URL du catalogue Anime-Sama, une fenêtre par saison. |
 | `main.py` | Le téléchargeur en ligne de commande (`python main.py --help`). |

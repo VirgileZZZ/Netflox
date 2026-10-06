@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Ma bibliothèque — Anime Downloader</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍿</text></svg>">
+<title>Netflox</title>
+<!-- le logo de Netflox: une etagere et un bouton lecture, sur la tuile en degrade -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237c5cff'/%3E%3Cstop offset='1' stop-color='%23ff4d8d'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='24' height='24' rx='6.5' fill='url(%23g)'/%3E%3Crect x='5.2' y='6.8' width='2.3' height='10.4' rx='1.15' fill='%23fff' opacity='.6'/%3E%3Cpath d='M9.6 7.4v9.2c0 .9 1 1.4 1.7.9l6.6-4.6c.6-.4.6-1.4 0-1.8l-6.6-4.6c-.7-.5-1.7 0-1.7.9z' fill='%23fff'/%3E%3C/svg%3E">
 <style>
 /* ============================================================ tokens ==== */
 *{margin:0;padding:0;box-sizing:border-box}
@@ -52,9 +53,11 @@ button{background:none;border:none;cursor:pointer}
 .brand:hover{background:rgba(255,255,255,.07)}
 .brand:active{transform:scale(.97)}
 .brand:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.brand .mark{width:30px;height:30px;border-radius:9px;background:var(--grad);display:grid;place-items:center;font-size:15px;box-shadow:0 6px 18px rgba(124,92,255,.4);transition:.15s}
+.brand .mark{width:30px;height:30px;border-radius:9px;background:var(--grad);display:grid;place-items:center;box-shadow:0 6px 18px rgba(124,92,255,.4);transition:.15s}
 .brand:hover .mark{transform:rotate(-6deg) scale(1.06)}
-.brand b{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+/* le nom: en minuscules et tres gras, le x seul en degrade */
+.wordmark{font-size:1.24rem;font-weight:800;letter-spacing:-.055em;line-height:1}
+.wordmark b{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;padding-right:.04em}
 .tnav{display:flex;gap:2px;margin-left:8px}
 .tnav button{padding:7px 12px;border-radius:9px;color:var(--muted);font-size:.9rem;font-weight:500;transition:.15s}
 .tnav button:hover{color:var(--text);background:rgba(255,255,255,.06)}
@@ -108,6 +111,10 @@ button{background:none;border:none;cursor:pointer}
   font-size:.72rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#c9b6ff;
 }
 .wkick::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.wlogo{display:flex;align-items:center;justify-content:center;gap:13px;margin-bottom:22px}
+.wlogo .mark{width:48px;height:48px;border-radius:14px;background:var(--grad);display:grid;place-items:center;box-shadow:0 12px 34px rgba(124,92,255,.45)}
+.wlogo .wordmark{font-size:2.1rem}
+
 .wbox .big{font-size:clamp(1.9rem,4.4vw,2.9rem);font-weight:800;letter-spacing:-.045em;line-height:1.08;margin-bottom:14px}
 .wbox .big em{font-style:normal;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
 .wbox p{color:var(--muted);font-size:1rem;margin-bottom:26px}
@@ -423,6 +430,10 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
 .pcues:empty{pointer-events:none}
 .pcues.prise{cursor:grabbing}
 .player.hide-ui .pcues{cursor:none}
+/* Sur la barre de temps, l'apercu passe devant: les sous-titres, poses plus
+   haut dans la page, recouvraient la bulle et l'heure survolee. */
+.pcues{transition:opacity .15s}
+.player:has(#scrub:hover) .pcues,.player:has(#scrub.drag) .pcues{opacity:0;pointer-events:none}
 .player.hide-ui .pfade{opacity:0;transform:translateY(6px);pointer-events:none}
 .ptop{top:0;padding:18px 22px 60px;background:linear-gradient(to bottom,rgba(0,0,0,.85),transparent);display:flex;align-items:center;gap:14px}
 .ptop .ptitle{font-size:1.02rem;font-weight:700;letter-spacing:-.02em}
@@ -449,6 +460,10 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
   box-shadow:0 6px 20px rgba(0,0,0,.6);
 }
 .scrub .bubble.novid{padding:3px 8px}
+/* l'image d'un autre moment, en attendant la bonne: on la devine sans s'y fier */
+.scrub .bubble canvas{transition:opacity .12s}
+.scrub .bubble.attente canvas{opacity:.3}
+
 .scrub .bubble.novid canvas{display:none}
 .scrub .bubble b{font-weight:700;font-variant-numeric:tabular-nums;padding:0 2px 1px}
 .scrub:hover .bubble,.scrub.drag .bubble{opacity:1}
@@ -797,6 +812,34 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
 .ed-name .ed-oeuvre[data-anime]:hover{color:var(--accent2)}
 .ed-name span{font-size:.75rem;color:var(--dim)}
 .ed-count{font-size:.82rem;font-weight:700;color:#dcdcea;font-variant-numeric:tabular-nums;flex:none}
+/* Spoilers: eteint, un oeil barre et le nombre d'edits mis de cote; allume,
+   la pastille passe au rose pour qu'on n'oublie pas qu'on les voit tous. */
+.ed-spoil{
+  display:flex;align-items:center;gap:7px;height:32px;padding:0 12px 0 10px;flex:none;
+  border-radius:999px;border:1.5px solid rgba(255,255,255,.28);background:rgba(10,10,16,.6);
+  color:#c9c9da;font-size:.78rem;font-weight:700;white-space:nowrap;transition:background .15s,border-color .15s,color .15s;
+}
+.ed-spoil:hover{color:#fff;border-color:rgba(255,255,255,.65)}
+.ed-spoil:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent2)}
+.ed-spoil .oeil{display:none}
+.ed-spoil.on{color:#fff;background:var(--accent2);border-color:var(--accent2)}
+.ed-spoil.on .oeil{display:block}
+.ed-spoil.on .oeil-barre{display:none}
+.ed-vide{cursor:default}
+/* le menu du clic droit sur un episode */
+.ctx{
+  position:fixed;z-index:400;min-width:230px;max-width:300px;padding:6px;border-radius:12px;
+  background:#101017;border:1px solid var(--line2);box-shadow:var(--sh);
+}
+.ctx h5{font-size:.72rem;font-weight:600;color:var(--dim);padding:5px 10px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctx button{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:8px;font-size:.88rem;color:#d4d4e2;text-align:left}
+.ctx button:hover,.ctx button:focus-visible{background:rgba(255,255,255,.08);color:var(--text);outline:none}
+.ctx button svg{flex:none;color:var(--muted)}
+.ctx button[data-ctx="vu"] svg,.ctx button[data-ctx="jusque"] svg{color:var(--ok)}
+.ctx button small{margin-left:auto;font-size:.74rem;color:var(--dim);font-variant-numeric:tabular-nums}
+.ctx .ctx-trait{height:1px;background:var(--line);margin:5px 6px}
+
+
 /* la colonne de droite, sous le pouce: le son puis la vitesse */
 .ed-side{position:absolute;right:14px;bottom:104px;z-index:5;display:grid;gap:10px;justify-items:center}
 /* La jauge de volume monte au-dessus du haut-parleur, et garde sa place meme
@@ -1007,7 +1050,7 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
 <body>
 
 <header class="topbar" id="topbar" hidden>
-  <button class="brand" data-go="home" title="Retour à l'accueil"><span class="mark">🍿</span><span>Ma <b>bibliothèque</b></span></button>
+  <button class="brand" data-go="home" title="Retour à l'accueil"><span class="mark"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.2" y="6.8" width="2.3" height="10.4" rx="1.15" fill="#fff" opacity=".6"/><path d="M9.6 7.4v9.2c0 .9 1 1.4 1.7.9l6.6-4.6c.6-.4.6-1.4 0-1.8l-6.6-4.6c-.7-.5-1.7 0-1.7.9z" fill="#fff"/></svg></span><span class="wordmark">netflo<b>x</b></span></button>
   <nav class="tnav" id="tnav">
     <button data-go="tout">Tout</button>
     <button data-go="all">Séries</button>
@@ -1027,6 +1070,7 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
   <!-- ------------------------------------------------------- accueil -->
   <section class="welcome" id="welcome">
     <div class="wbox">
+      <div class="wlogo"><span class="mark"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.2" y="6.8" width="2.3" height="10.4" rx="1.15" fill="#fff" opacity=".6"/><path d="M9.6 7.4v9.2c0 .9 1 1.4 1.7.9l6.6-4.6c.6-.4.6-1.4 0-1.8l-6.6-4.6c-.7-.5-1.7 0-1.7.9z" fill="#fff"/></svg></span><span class="wordmark">netflo<b>x</b></span></div>
       <div class="wkick">Hors ligne · sur ta machine</div>
       <h1 class="big">Ta collection,<br>façon <em>streaming</em>.</h1>
       <p>Aucun serveur, aucune installation. Choisis ton dossier <code style="background:var(--card2);border:1px solid var(--line);padding:2px 7px;border-radius:6px">videos</code> et tout se range tout seul.</p>
@@ -1039,7 +1083,7 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
       </div>
       <div class="wsteps">
         <div class="wstep"><b>Détection automatique</b>Séries, saisons, épisodes, jaquettes et light novels sont reconnus tout seuls.</div>
-        <div class="wstep"><b>Reprise de lecture</b>Chaque épisode reprend là où tu t'es arrêté, comme sur Netflix.</div>
+        <div class="wstep"><b>Reprise de lecture</b>Chaque épisode reprend là où tu t'es arrêté, à la seconde près.</div>
         <div class="wstep"><b>Nouveaux épisodes</b>Ils apparaissent au retour sur la page, sans rien retoucher.</div>
       </div>
       <div class="wnote" id="fsNote"></div>
@@ -1172,6 +1216,12 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
     <button class="pbtn" id="edClose" aria-label="Fermer"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M19 12H5m0 0 6-6m-6 6 6 6"/></svg></button>
     <div class="ed-name"><button class="ed-oeuvre" id="edTitle" title="Ouvrir la fiche de l’œuvre"></button><span id="edSub"></span></div>
     <span class="ed-count" id="edCount">0 / 0</span>
+    <!-- desactive a chaque ouverture: les edits qui montrent la suite restent caches -->
+    <button class="ed-spoil" id="edSpoil" aria-pressed="false">
+      <svg class="oeil-barre" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 5.1A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-2.9 3.8M6.6 6.6C3.6 8.5 2 12 2 12s3.5 7 10 7a9.9 9.9 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m3 3 18 18"/></svg>
+      <svg class="oeil" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span id="edSpoilTxt">Sans spoiler</span>
+    </button>
   </div>
   <div class="ed-side">
     <div class="ed-volwrap">
@@ -1196,21 +1246,21 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
      pas charger de module, le navigateur y voit une requete inter-origines
      et la refuse. Ils partagent donc la meme portee globale, comme lorsque
      tout tenait dans une seule balise — et l'ordre ci-dessous compte. -->
-<script src="js/01-outils.js?v=20261005d"></script>
-<script src="js/02-algo-edits.js?v=20261005d"></script>
-<script src="js/03-etat.js?v=20261005d"></script>
-<script src="js/04-dossier.js?v=20261005d"></script>
-<script src="js/05-scan.js?v=20261005d"></script>
-<script src="js/06-accompagnement.js?v=20261005d"></script>
-<script src="js/07-rendu.js?v=20261005d"></script>
-<script src="js/08-partage.js?v=20261005d"></script>
-<script src="js/09-fiches.js?v=20261005d"></script>
-<script src="js/10-vignettes.js?v=20261005d"></script>
-<script src="js/11-documents.js?v=20261005d"></script>
-<script src="js/12-lecteur-scans.js?v=20261005d"></script>
-<script src="js/13-fil-edits.js?v=20261005d"></script>
-<script src="js/14-lecteur.js?v=20261005d"></script>
-<script src="js/15-demarrage.js?v=20261005d"></script>
+<script src="js/01-outils.js?v=20261006f"></script>
+<script src="js/02-algo-edits.js?v=20261006f"></script>
+<script src="js/03-etat.js?v=20261006f"></script>
+<script src="js/04-dossier.js?v=20261006f"></script>
+<script src="js/05-scan.js?v=20261006f"></script>
+<script src="js/06-accompagnement.js?v=20261006f"></script>
+<script src="js/07-rendu.js?v=20261006f"></script>
+<script src="js/08-partage.js?v=20261006f"></script>
+<script src="js/09-fiches.js?v=20261006f"></script>
+<script src="js/10-vignettes.js?v=20261006f"></script>
+<script src="js/11-documents.js?v=20261006f"></script>
+<script src="js/12-lecteur-scans.js?v=20261006f"></script>
+<script src="js/13-fil-edits.js?v=20261006f"></script>
+<script src="js/14-lecteur.js?v=20261006f"></script>
+<script src="js/15-demarrage.js?v=20261006f"></script>
 
 </body>
 </html>

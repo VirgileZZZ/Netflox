@@ -125,7 +125,8 @@ function renderHero(a, resumeEp){
   $('#hero').innerHTML =
     '<div class="hero-bg">' + artTag(a) + '</div>' +
     '<div class="hero-in">' +
-      '<div class="hero-kicker">' + (resumeEp ? 'On reprend ?' : 'Dans ta collection') + '</div>' +
+      '<div class="hero-kicker">' + (resumeEp ? 'On reprend ?' : 'À la une sur Netflox')
+ + '</div>' +
       '<h1>' + esc(a.title) + '</h1>' +
       '<div class="hero-meta">' +
         (a.episodes.length || !a.edits.length
@@ -211,18 +212,21 @@ const STAR_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true
 /** Une note ecrite avec la virgule francaise: 8, ou 8,7. */
 function fmtNote(n){ return String(Math.round(n * 10) / 10).replace('.', ','); }
 
-/** D'ou sort le chiffre affiche: le dire evite de le prendre pour le mien. */
+/** D'ou sort le chiffre affiche: le dire evite de le prendre pour le mien.
+    Chez l'invite, l'avis de l'hote reste un avis parmi d'autres: on dit qu'il
+    compte, pas ce qu'il vaut. */
 function noteDetail(c){
-  // chez l'invite, la note est un chiffre et rien d'autre: le detail dirait
-  // ce que l'hote a mis, or ce qu'il pense de ses series ne le regarde pas
-  if (S.shared) return '';
   if (c.auto) return c.note ? 'Moyenne des \u00e9pisodes' : '';
-  if (c.mine && c.imdb)
-    return 'Ma note ' + fmtNote(c.mine) + ' \u00b7 IMDb ' + fmtNote(c.imdb) +
-           ' \u2192 ' + fmtNote(c.note);
-  if (c.mine) return 'Ma note';
-  if (c.imdb) return 'Note IMDb';
-  return '';
+  const hote = !S.shared || S.estHote;
+  const bouts = [];
+  if (hote && c.mine) bouts.push('Ma note ' + fmtNote(c.mine));
+  if (!hote && c.perso) bouts.push('Ta note ' + fmtNote(c.perso));
+  if (c.imdb) bouts.push('IMDb ' + fmtNote(c.imdb));
+  if (c.inv) bouts.push('Invit\u00e9s ' + fmtNote(c.inv.v) + ' (' + fmtCount(c.inv.n, 'vote', 'votes') +
+                        (c.inv.w < .5 ? ', loin des autres : compte peu' : '') + ')');
+  if (!hote && c.mine) bouts.push('et l\u2019h\u00f4te');
+  if (!bouts.length) return '';
+  return bouts.join(' \u00b7 ') + (bouts.length > 1 ? ' \u2192 ' + fmtNote(c.note) : '');
 }
 
 /**
@@ -233,7 +237,7 @@ function noteDetail(c){
  */
 function rateHTML(cible){
   const c = noteCible(cible);
-  const fige = S.shared;
+  const fige = S.shared && !S.peutNoter;       // un partage d'avant les notes d'invites
   if (fige && !c.note) return '';
   let etoiles = '';
   for (let i = 0; i < 5; i++){
@@ -247,7 +251,7 @@ function rateHTML(cible){
   }
   const detail = noteDetail(c);
   return '<span class="rate' + (fige ? '' : ' set') + (c.note ? ' has' : '') +
-      (c.note && !c.mine ? ' ext' : '') + '" data-rate="' + esc(cible) + '"' +
+      (c.note && !c.perso ? ' ext' : '') + '" data-rate="' + esc(cible) + '"' +
       (detail ? ' title="' + esc(detail) + '"' : '') + '>' + etoiles +
     (c.note ? '<span class="val">' + fmtNote(c.note) + '<small>/10</small></span>' : '') +
   '</span>';
@@ -255,9 +259,9 @@ function rateHTML(cible){
 /** Bloc de notation d'une serie, sur sa fiche comme sur sa page de lecture. */
 function noteBoxHTML(a){
   const c = noteCible('s:' + a.key);
-  if (S.shared && !c.note) return '';
+  if (S.shared && !S.peutNoter && !c.note) return '';
   const dit = noteDetail(c);
-  const detail = !S.shared && !c.mine
+  const detail = (!S.shared || S.peutNoter) && !c.perso
     ? (dit ? dit + ' \u2014 clique pour donner la tienne'
            : 'Clique sur une \u00e9toile pour noter')
     : dit;
@@ -276,7 +280,7 @@ function descHTML(a){
 function noteMarkHTML(a){
   const c = noteCible('s:' + a.key);
   if (!c.note) return '';
-  return '<span class="notemark' + (c.mine ? '' : ' ext') + '" title="' +
+  return '<span class="notemark' + (c.perso ? '' : ' ext') + '" title="' +
     esc(noteDetail(c) || 'Note') + '">' + STAR_SVG + fmtNote(c.note) + '</span>';
 }
 /* Une note posee change aussi la moyenne affichee plus haut: on redessine
@@ -298,9 +302,11 @@ function poserNote(btn){
   if (!box) return;
   const c = noteCible(box.dataset.rate);
   const n = normNote(btn.dataset.rateN);
-  const val = (n === c.mine) ? 0 : n;          // recliquer sa propre etoile la retire
+  const val = (n === c.perso) ? 0 : n;         // recliquer sa propre etoile la retire
+  if (S.shared){ envoyerNote(box.dataset.rate, val); return; }
   if (c.ep) setEpNote(c.id, val); else setNote(c.id, val);
   majNotes();
+
 }
 
 const ICON_BROOM =
@@ -1036,3 +1042,111 @@ $('#dirInput').addEventListener('change', async (ev) => {
   await scan();
   toast('Astuce : utilise Chrome ou Edge pour que le dossier soit retrouvé tout seul au prochain lancement');
 });
+
+/* ------------------------------------------ vu / pas vu, a la main ---
+ * Clic droit sur un episode (appui long sur un telephone): le marquer vu ou
+ * non vu, ou tout marquer vu jusqu'a lui. C'est aussi ce qui libere les edits
+ * annotes sur un episode regarde ailleurs, ou quitte avant la fin.
+ *
+ * « Non vu » n'efface pas la position: il en pose une neuve, a zero. Effacee,
+ * bibliotheque.json la rendrait au rechargement suivant; datee de maintenant,
+ * c'est elle qui gagne la fusion, et le fichier la perd a sa reecriture.
+ */
+function marquerVu(eps, vu){
+  const avant = eps.map(e => [e, getProgress(e)]);
+  const at = Date.now();
+  for (const e of eps){
+    const p = getProgress(e);
+    const d = p && p.d ? p.d : 1;      // jamais lance: la duree est inconnue, seule la fraction compte
+    store.set(progressKey(e), vu ? { t: d, d, done: true, at } : { t: 0, d, done: false, at });
+    touched(e.anime);
+  }
+  flushProgress();
+  return avant;
+}
+function retablirVu(avant){
+  const at = Date.now();
+  for (const [e, p] of avant)
+    store.set(progressKey(e), p ? Object.assign({}, p, { at }) : { t: 0, d: 1, done: false, at });
+  avant.forEach(([e]) => touched(e.anime));
+  flushProgress();
+  rafraichirVue();
+}
+function rafraichirVue(){
+  const y = scrollY;
+  render();
+  scrollTo(0, y);
+}
+const CTX = document.createElement('div');
+CTX.className = 'ctx'; CTX.id = 'ctxMenu'; CTX.hidden = true; CTX.setAttribute('role', 'menu');
+document.body.appendChild(CTX);
+let ctxEp = null, ctxOuvert = 0;
+function fermerCtx(){ CTX.hidden = true; ctxEp = null; }
+const ICO_VU = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+const ICO_PASVU = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 8.5l7 7"/></svg>';
+const ICO_JUSQUE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12.5 3.5 3.5L14 9.5"/><path d="m10.5 16 1 1L20 8.5"/></svg>';
+const ICO_LIRE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="m6 4 14 8-14 8z"/></svg>';
+function ouvrirCtx(e, x, y){
+  const a = S.byKey.get(e.anime);
+  const p = getProgress(e);
+  const vu = !!(p && p.done);
+  const avant = a ? a.episodes.filter(x => x.idx <= e.idx) : [e];
+  const reste = avant.filter(x => { const q = getProgress(x); return !(q && q.done); }).length;
+  const season = a && a.seasonList.length > 1 ? seasonLabel(e.seasonKey) + ' · ' : '';
+  ctxEp = e;
+  ctxOuvert = performance.now();
+  CTX.innerHTML =
+    '<h5>' + esc((a ? a.title + ' · ' : '') + season + (e.ep != null ? 'Ép. ' + e.ep : e.title)) + '</h5>' +
+    '<button role="menuitem" data-ctx="lire">' + ICO_LIRE + 'Lire</button>' +
+    '<div class="ctx-trait"></div>' +
+    (vu ? '<button role="menuitem" data-ctx="pasvu">' + ICO_PASVU + 'Marquer comme non vu</button>'
+        : '<button role="menuitem" data-ctx="vu">' + ICO_VU + 'Marquer comme vu</button>') +
+    (avant.length > 1 && reste > (vu ? 0 : 1)
+      ? '<button role="menuitem" data-ctx="jusque">' + ICO_JUSQUE + 'Marquer vu jusqu\'ici<small>' +
+        fmtCount(reste, 'épisode', 'épisodes') + '</small></button>' : '');
+  CTX.hidden = false;
+  const w = CTX.offsetWidth, h = CTX.offsetHeight;
+  CTX.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
+  CTX.style.top  = Math.max(8, Math.min(y, innerHeight - h - 8)) + 'px';
+  const premier = CTX.querySelector('button');
+  if (premier) premier.focus({ preventScroll: true });
+}
+document.addEventListener('contextmenu', (ev) => {
+  const t = ev.target.closest('[data-play]');
+  if (!t || t.tagName === 'BUTTON' || t.closest('#player')) return;
+  const e = findEp(t.dataset.play);
+  if (!e) return;
+  ev.preventDefault();
+  let x = ev.clientX, y = ev.clientY;
+  if (!x && !y){ const r = t.getBoundingClientRect(); x = r.left + 24; y = r.top + r.height / 2; }   // touche Menu du clavier
+  ouvrirCtx(e, x, y);
+});
+CTX.addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-ctx]');
+  if (!b || !ctxEp) return;
+  const e = ctxEp, a = S.byKey.get(e.anime), quoi = b.dataset.ctx;
+  fermerCtx();
+  if (quoi === 'lire'){ openPlayer(e); return; }
+  let eps = [e];
+  if (quoi === 'jusque' && a) eps = a.episodes.filter(x => x.idx <= e.idx && !(getProgress(x) || {}).done);
+  const avant = marquerVu(eps, quoi !== 'pasvu');
+  rafraichirVue();
+  const msg = quoi === 'pasvu' ? 'Marqué comme non vu'
+            : quoi === 'jusque' ? fmtCount(eps.length, 'épisode marqué vu', 'épisodes marqués vus')
+            : 'Marqué comme vu';
+  toastAction(msg, 'Annuler', () => retablirVu(avant));
+});
+document.addEventListener('pointerdown', (ev) => { if (!CTX.hidden && !CTX.contains(ev.target)) fermerCtx(); }, true);
+// un defilement fait juste avant le clic droit arrive un instant apres: il ne ferme rien
+addEventListener('scroll', () => { if (!CTX.hidden && performance.now() - ctxOuvert > 150) fermerCtx(); }, true);
+
+addEventListener('resize', () => { if (!CTX.hidden) fermerCtx(); });
+addEventListener('keydown', (ev) => {
+  if (CTX.hidden) return;
+  if (ev.key === 'Escape'){ ev.preventDefault(); ev.stopPropagation(); fermerCtx(); return; }
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp'){
+    ev.preventDefault();
+    const l = [...CTX.querySelectorAll('button')], i = l.indexOf(document.activeElement);
+    l[(i + (ev.key === 'ArrowDown' ? 1 : -1) + l.length) % l.length].focus();
+  }
+}, true);

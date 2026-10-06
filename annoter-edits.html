@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annoter les edits · Netflox</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237c5cff'/%3E%3Cstop offset='1' stop-color='%23ff4d8d'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='24' height='24' rx='6.5' fill='url(%23g)'/%3E%3Crect x='5.2' y='6.8' width='2.3' height='10.4' rx='1.15' fill='%23fff' opacity='.6'/%3E%3Cpath d='M9.6 7.4v9.2c0 .9 1 1.4 1.7.9l6.6-4.6c.6-.4.6-1.4 0-1.8l-6.6-4.6c-.7-.5-1.7 0-1.7.9z' fill='%23fff'/%3E%3C/svg%3E">
+<!--
+  Page a part de Netflox: on y dit, pour chaque edit, jusqu'a quel episode il
+  montre l'histoire. La bibliotheque (index.html) s'en sert pour ne mettre dans
+  le fil que les edits qui ne spoilent rien de ce qui n'a pas ete vu.
+
+  Ce qui est ecrit, dans le bibliotheque.json de chaque serie:
+      "spoil_edits": { "edits/xxx.mov": "saison1/serie_5.mp4", "edits/yyy.mov": "aucun" }
+  et la meme table dans le navigateur (ad2.spoils), pour qu'une bibliotheque
+  ouverte en meme temps ne l'efface pas en reecrivant le fichier.
+
+  Elle relit le dossier avec le meme code que la bibliotheque (js/01 et js/02):
+  memes series, memes episodes, memes edits, memes « Edit 12 ».
+-->
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  color-scheme:dark;
+  --bg:#08080c; --bg2:#0d0d13; --card:#15151e; --card2:#1e1e2b; --card3:#282838;
+  --line:#25252f; --line2:#33334a;
+  --text:#f3f3f8; --muted:#9b9bb2; --dim:#67677f;
+  --accent:#7c5cff; --accent2:#ff4d8d; --ok:#28e0a0; --warn:#ffb020; --bad:#ff5c5c;
+  --grad:linear-gradient(120deg,var(--accent),var(--accent2));
+}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:"Inter","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  font-size:15px;line-height:1.5;letter-spacing:-.008em;-webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+button,input{font:inherit;color:inherit;background:none;border:0}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+[hidden]{display:none !important}
+
+/* ------------------------------------------------------------ haut */
+.top{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--bg2);flex:none}
+.top h1{display:flex;align-items:center;gap:10px;font-size:1.05rem;font-weight:800;letter-spacing:-.03em}
+.top h1 .mark{width:28px;height:28px;border-radius:8px;background:var(--grad);display:grid;place-items:center;flex:none;box-shadow:0 6px 18px rgba(124,92,255,.4)}
+.top h1 .wordmark{font-size:1.15rem;letter-spacing:-.055em}
+.top h1 .wordmark b{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.top h1 .quoi{color:var(--muted);font-weight:700}
+.top .sous{font-size:.8rem;color:var(--muted)}
+.top .gap{flex:1}
+.total{font-size:.82rem;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.total b{color:var(--text)}
+.lien{font-size:.82rem;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;border:1px solid var(--line2);white-space:nowrap}
+.lien:hover{color:var(--text);border-color:var(--muted)}
+
+/* --------------------------------------------------------- accueil */
+.accueil{flex:1;display:grid;place-items:center;padding:24px}
+.carte{max-width:520px;text-align:center;display:grid;gap:14px;justify-items:center}
+.carte h2{font-size:1.5rem;letter-spacing:-.03em}
+.carte p{color:var(--muted)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:11px;font-weight:700;transition:.15s}
+.btn-p{background:var(--grad);color:#fff;box-shadow:0 10px 30px rgba(124,92,255,.3)}
+.btn-p:hover{filter:brightness(1.1)}
+.btn-g{border:1px solid var(--line2);color:var(--muted)}
+.btn-g:hover{color:var(--text);border-color:var(--muted)}
+.attente{color:var(--muted);font-size:.9rem}
+
+/* ------------------------------------------------------- l'atelier */
+.atelier{flex:1;min-height:0;display:grid;grid-template-columns:260px minmax(0,1fr) 360px}
+.series{border-right:1px solid var(--line);overflow-y:auto;padding:10px}
+.series h3,.choix h3{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);padding:6px 8px 8px}
+.serie{display:grid;grid-template-columns:38px 1fr;gap:10px;align-items:center;width:100%;text-align:left;padding:8px;border-radius:10px;transition:.12s}
+.serie:hover{background:var(--card)}
+.serie.on{background:var(--card2);box-shadow:inset 3px 0 0 var(--accent2)}
+.serie .vign{width:38px;height:52px;border-radius:6px;background:var(--card3) center/cover no-repeat}
+.serie b{display:block;font-size:.86rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.serie small{font-size:.74rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.serie .jauge{height:3px;border-radius:2px;background:var(--line2);margin-top:5px;overflow:hidden}
+.serie .jauge i{display:block;height:100%;background:var(--ok)}
+.serie.fini small{color:var(--ok)}
+.serie[disabled]{opacity:.45;cursor:default}
+.serie[disabled]:hover{background:none}
+
+.scene{display:flex;flex-direction:column;min-height:0;min-width:0;padding:14px 18px;gap:12px}
+.ecran{position:relative;flex:1;min-height:0;border-radius:14px;background:#000;overflow:hidden;cursor:pointer}
+.ecran video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.ecran .pause{position:absolute;inset:0;margin:auto;width:64px;height:64px;border-radius:50%;background:rgba(10,10,16,.72);display:grid;place-items:center;opacity:0;transition:.15s;pointer-events:none}
+.ecran.arret .pause{opacity:1}
+.ecran .son{position:absolute;right:10px;bottom:10px;width:38px;height:38px;border-radius:50%;background:rgba(10,10,16,.72);display:grid;place-items:center}
+.ecran .son:hover{background:rgba(40,40,56,.9)}
+.ecran .illisible{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);text-align:center;padding:20px;font-size:.9rem}
+.legende{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.legende b{font-size:1.05rem;letter-spacing:-.02em}
+.legende .fich{font-size:.78rem;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46ch}
+.etat{font-size:.76rem;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--card2);color:var(--muted);white-space:nowrap}
+.etat.ok{background:rgba(40,224,160,.14);color:var(--ok)}
+.etat.libre{background:rgba(124,92,255,.18);color:#b9a8ff}
+.nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.nav .pos{font-variant-numeric:tabular-nums;font-weight:700;font-size:.86rem;min-width:70px;text-align:center}
+.nav .gap{flex:1}
+.case{display:inline-flex;align-items:center;gap:7px;font-size:.82rem;color:var(--muted);cursor:pointer;user-select:none}
+.case input{accent-color:var(--accent2);width:15px;height:15px}
+.pellicule{display:flex;gap:5px;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin;flex:none}
+.pellicule button{flex:none;min-width:30px;height:28px;padding:0 6px;border-radius:7px;font-size:.74rem;font-weight:700;font-variant-numeric:tabular-nums;
+  background:var(--card);color:var(--dim);border:1px solid var(--line)}
+.pellicule button.ok{color:var(--ok);border-color:rgba(40,224,160,.35)}
+.pellicule button.on{background:var(--text);color:#0b0b10;border-color:var(--text)}
+
+.choix{border-left:1px solid var(--line);overflow-y:auto;padding:14px 16px 24px;display:flex;flex-direction:column;gap:12px}
+.choix .q{font-size:1.02rem;font-weight:800;letter-spacing:-.02em;line-height:1.3}
+.choix .aide{font-size:.8rem;color:var(--muted)}
+.actuel{font-size:.82rem;padding:9px 11px;border-radius:10px;background:var(--card);color:var(--muted)}
+.actuel b{color:var(--text)}
+.aucun{width:100%;text-align:left;padding:11px 13px;border-radius:11px;border:1.5px solid var(--line2);font-weight:700;font-size:.9rem;transition:.12s}
+.aucun small{display:block;font-weight:500;font-size:.76rem;color:var(--muted)}
+.aucun:hover{border-color:var(--accent)}
+.aucun.on{border-color:var(--accent);background:rgba(124,92,255,.16)}
+.saison h4{font-size:.78rem;font-weight:700;color:var(--muted);margin:4px 0 7px}
+.grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(42px,1fr));gap:6px}
+.ep{position:relative;height:38px;border-radius:9px;background:var(--card);border:1px solid var(--line);font-weight:700;font-size:.85rem;font-variant-numeric:tabular-nums;transition:.1s}
+.ep:hover{background:var(--card2);border-color:var(--line2)}
+.ep.vu::after{content:'';position:absolute;top:5px;right:5px;width:5px;height:5px;border-radius:50%;background:var(--ok)}
+.ep.avant{background:rgba(255,77,141,.12);border-color:rgba(255,77,141,.25)}
+.ep.on{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.legende-ep{font-size:.72rem;color:var(--dim);display:flex;gap:12px;flex-wrap:wrap}
+.legende-ep i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:5px;vertical-align:middle}
+.effacer{align-self:flex-start;font-size:.8rem;color:var(--muted);padding:6px 10px;border-radius:8px;border:1px solid var(--line2)}
+.effacer:hover{color:var(--bad);border-color:var(--bad)}
+.touches{font-size:.72rem;color:var(--dim);line-height:1.8}
+kbd{font-family:ui-monospace,Consolas,monospace;font-size:.7rem;padding:1px 5px;border-radius:5px;border:1px solid var(--line2);background:var(--card);color:var(--muted)}
+
+.toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);opacity:0;transition:.2s;pointer-events:none;
+  background:var(--card2);border:1px solid var(--line2);padding:9px 15px;border-radius:10px;font-size:.85rem;box-shadow:0 12px 30px rgba(0,0,0,.5);z-index:9}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast.bad{border-color:var(--bad);color:#ffb3b3}
+
+/* Petit ecran: tout s'empile et la page defile, au lieu de tenir dans la hauteur. */
+@media (max-width:1000px){
+  html,body{height:auto}
+  body{display:block;overflow:auto}
+  .top{position:sticky;top:0;z-index:5;flex-wrap:wrap;gap:8px 14px}
+  .top h1{font-size:.98rem}
+  .atelier{display:block}
+  .series{border-right:0;border-bottom:1px solid var(--line);display:flex;gap:6px;overflow-x:auto;overflow-y:hidden}
+  .series h3{display:none}
+  .serie{width:200px;flex:none}
+  .scene{padding:12px 16px}
+  .ecran{flex:none;height:58vh}
+  .nav .gap{display:none}
+  .nav .case{flex-basis:100%}
+  .choix{border-left:0;border-top:1px solid var(--line);overflow:visible;padding:14px 16px 28px}
+  .top .sous{display:none}
+}
+
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1><span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.2" y="6.8" width="2.3" height="10.4" rx="1.15" fill="#fff" opacity=".6"/><path d="M9.6 7.4v9.2c0 .9 1 1.4 1.7.9l6.6-4.6c.6-.4.6-1.4 0-1.8l-6.6-4.6c-.7-.5-1.7 0-1.7.9z" fill="#fff"/></svg></span><span class="wordmark">netflo<b>x</b></span><span class="quoi">· Annoter les edits</span></h1>
+
+    <div class="sous">Pour chaque edit : jusqu'à quel épisode il montre l'histoire.</div>
+  </div>
+  <div class="gap"></div>
+  <div class="total" id="total" hidden></div>
+  <a class="lien" href="index.html">← Bibliothèque</a>
+</header>
+
+<section class="accueil" id="accueil">
+  <div class="carte">
+    <h2>Quels edits spoilent ?</h2>
+    <p>Choisis le dossier <b>videos</b>. Pour chaque edit, tu indiques le dernier épisode qu'il montre :
+       dans la bibliothèque, il n'apparaîtra qu'une fois cet épisode vu.</p>
+    <div id="boutons"></div>
+    <p class="attente" id="attente" hidden>Lecture du dossier…</p>
+  </div>
+</section>
+
+<main class="atelier" id="atelier" hidden>
+  <nav class="series" id="series"></nav>
+
+  <section class="scene">
+    <div class="ecran arret" id="ecran">
+      <video id="vid" loop playsinline preload="auto"></video>
+      <div class="pause"><svg width="26" height="26" viewBox="0 0 24 24" fill="#fff"><path d="m7 4 13 8-13 8z"/></svg></div>
+      <button class="son" id="son" aria-label="Son"></button>
+    </div>
+    <div class="legende">
+      <b id="nom"></b>
+      <span class="etat" id="etat"></span>
+      <span class="fich" id="fich"></span>
+    </div>
+    <div class="nav">
+      <button class="btn btn-g" id="prec">‹ Précédent</button>
+      <span class="pos" id="pos"></span>
+      <button class="btn btn-g" id="suiv">Suivant ›</button>
+      <div class="gap"></div>
+      <label class="case"><input type="checkbox" id="auto" checked> Passer au suivant après un choix</label>
+      <label class="case"><input type="checkbox" id="afaire"> Seulement ceux à faire</label>
+    </div>
+    <div class="pellicule" id="pellicule"></div>
+  </section>
+
+  <aside class="choix">
+    <div class="q">Jusqu'à quel épisode cet edit montre l'histoire&nbsp;?</div>
+    <div class="aide">Il apparaîtra dans le fil une fois cet épisode vu jusqu'au bout.</div>
+    <div class="actuel" id="actuel"></div>
+    <button class="aucun" id="aucun">Aucun spoil<small>Visible tout de suite, même sans avoir commencé la série</small></button>
+    <div id="saisons"></div>
+    <div class="legende-ep"><span><i></i>déjà vu</span></div>
+    <button class="effacer" id="effacer">Retirer l'annotation</button>
+    <div class="touches">
+      <kbd>←</kbd> <kbd>→</kbd> edit précédent / suivant · <kbd>Espace</kbd> pause · <kbd>M</kbd> son<br>
+      <kbd>0</kbd> aucun spoil · <kbd>Suppr</kbd> retirer l'annotation
+    </div>
+  </aside>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<!-- le meme code que la bibliotheque pour lire le dossier: scripts purs, sans page -->
+<script src="js/01-outils.js"></script>
+<script src="js/02-algo-edits.js"></script>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const FICHE = 'bibliotheque.json';
+
+/* Le rangement du navigateur est celui de la bibliotheque: memes cles « ad2. ». */
+const ls = {
+  get(k, d){ try { const v = localStorage.getItem('ad2.' + k); return v == null ? d : JSON.parse(v); } catch(e){ return d; } },
+  set(k, v){ try { localStorage.setItem('ad2.' + k, JSON.stringify(v)); } catch(e){} }
+};
+/* Le dossier deja autorise dans la bibliotheque: meme base, meme cle. */
+const idb = {
+  open(){
+    return new Promise((res, rej) => {
+      let r;
+      try { r = indexedDB.open('ad2', 1); } catch(e){ return rej(e); }
+      r.onupgradeneeded = () => { try { r.result.createObjectStore('kv'); } catch(e){} };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  },
+  async get(k){
+    const db = await idb.open();
+    return new Promise((res, rej) => {
+      const rq = db.transaction('kv', 'readonly').objectStore('kv').get(k);
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+    });
+  }
+};
+
+let toastT = 0;
+function toast(msg, genre){
+  const t = $('#toast');
+  t.textContent = msg; t.className = 'toast on' + (genre ? ' ' + genre : '');
+  clearTimeout(toastT); toastT = setTimeout(() => { t.className = 'toast'; }, 2200);
+}
+
+const A = {
+  series: [],            // les oeuvres qui ont des edits
+  dirs: new Map(),       // nom de dossier de serie -> poignee, pour y ecrire
+  serie: null, i: 0,     // l'oeuvre et l'edit a l'ecran
+  url: null,             // blob: de la video en cours
+  attente: new Map()     // serie -> minuteur d'ecriture
+};
+
+/* ------------------------------------------------------ le dossier -- */
+async function demarrer(){
+  const boutons = $('#boutons');
+  if (typeof window.showDirectoryPicker !== 'function'){
+    boutons.innerHTML = '<p class="attente">Il faut Chrome, Edge ou Opera sur l\'ordinateur où sont les vidéos : ' +
+      'ouvre <b>annoter-edits.html</b> d\'un double-clic. Un lien de partage ne permet pas d\'écrire.</p>';
+    return;
+  }
+  let connu = null;
+  try { connu = await idb.get('dir'); } catch(e){}
+  boutons.innerHTML =
+    (connu ? '<button class="btn btn-p" id="rouvrir">Ouvrir « ' + esc(connu.name) + ' »</button> ' : '') +
+    '<button class="btn ' + (connu ? 'btn-g' : 'btn-p') + '" id="choisir">' +
+      (connu ? 'Un autre dossier' : 'Choisir le dossier videos') + '</button>';
+  if (connu) $('#rouvrir').addEventListener('click', async () => {
+    try {
+      if (await connu.requestPermission({ mode:'readwrite' }) !== 'granted') return toast('Autorisation refusée', 'bad');
+      await ouvrir(connu);
+    } catch(e){ toast('Impossible de rouvrir ce dossier', 'bad'); }
+  });
+  $('#choisir').addEventListener('click', async () => {
+    let h;
+    try { h = await showDirectoryPicker({ id:'netflox', mode:'readwrite' }); } catch(e){ return; }
+    await ouvrir(h);
+  });
+}
+
+/* Le parcours de la bibliotheque, en plus court: les pages de scans n'ont
+   pas besoin d'etre ouvertes, les videos si — leur date range les edits. */
+async function* parcourir(dir, chemin){
+  for await (const ent of dir.values()){
+    if (ent.kind === 'directory'){
+      if (shouldSkipDir(ent.name)) continue;
+      const sous = chemin.concat(ent.name);
+      if (stripRoot(sous).length === 1) A.dirs.set(ent.name, ent);
+      yield* parcourir(ent, sous);
+    } else yield { handle: ent, path: chemin.concat(ent.name) };
+  }
+}
+async function ouvrir(racine){
+  $('#boutons').hidden = true;
+  $('#attente').hidden = false;
+  A.dirs = new Map();
+  const fichiers = [];
+  try {
+    for await (const it of parcourir(racine, [])){
+      const nom = it.path[it.path.length - 1];
+      const genre = kindOf(nom);
+      if (genre !== 'video' && genre !== 'image') continue;
+      let f = null;
+      if (genre === 'video'){ try { f = await it.handle.getFile(); } catch(e){} }
+      fichiers.push({ path: it.path, size: f ? f.size : 0, lastModified: f ? f.lastModified : 0,
+                      ref: { kind:'handle', handle: it.handle, file: f } });
+    }
+  } catch(e){
+    $('#boutons').hidden = false; $('#attente').hidden = true;
+    return toast('Lecture du dossier impossible : ' + e.message, 'bad');
+  }
+  const lib = buildLibrary(fichiers).filter(a => a.edits.length);
+  if (!lib.length){
+    $('#boutons').hidden = false; $('#attente').hidden = true;
+    return toast('Aucun dossier « edits » dans « ' + racine.name + ' »', 'bad');
+  }
+  const memo = ls.get('spoils', {}) || {};
+  for (const a of lib){
+    a.fiche = await lireFiche(a);
+    // ce que le fichier dit fait foi; le navigateur complete ce qui n'y est pas encore
+    a.spoils = {};
+    for (const e of a.edits){
+      const court = e.rel.slice(a.key.length + 1);
+      const v = (a.fiche.spoil_edits || {})[court] || memo[e.rel];
+      if (typeof v === 'string' && v) a.spoils[court] = v;
+    }
+    const titres = a.fiche.titres_episodes || {};
+    for (const ep of a.episodes){
+      const t = titreUtile(titres[ep.rel.slice(a.key.length + 1)]);
+      if (t) ep.title = t;
+    }
+  }
+  // les oeuvres avec des episodes d'abord: les autres n'ont rien a cacher
+  A.series = lib.sort((x, y) => (!x.episodes.length - !y.episodes.length) || naturalCompare(x.title, y.title));
+  $('#accueil').hidden = true;
+  $('#atelier').hidden = false;
+  $('#total').hidden = false;
+  peindreSeries();
+  const premiere = A.series.find(a => a.episodes.length && fait(a) < a.edits.length) || A.series[0];
+  choisirSerie(premiere.key);
+}
+async function lireFiche(a){
+  const dir = A.dirs.get(a.key);
+  if (!dir) return {};
+  try {
+    const fh = await dir.getFileHandle(FICHE);
+    const d = JSON.parse(await (await fh.getFile()).text());
+    return d && typeof d === 'object' ? d : {};
+  } catch(e){ return {}; }
+}
+
+/* --------------------------------------------------- l'enregistrement */
+function court(a, e){ return e.rel.slice(a.key.length + 1); }
+function annotation(a, e){ return a.spoils[court(a, e)] || ''; }
+function fait(a){ return a.edits.filter(e => annotation(a, e)).length; }
+
+function annoter(valeur){
+  const a = A.serie, e = a && a.edits[A.i];
+  if (!e || !a.episodes.length) return;
+  const c = court(a, e);
+  if (valeur) a.spoils[c] = valeur; else delete a.spoils[c];
+  // dans le navigateur tout de suite: la bibliotheque, si elle est ouverte,
+  // le reprendra en reecrivant son fichier au lieu de l'effacer
+  const memo = ls.get('spoils', {}) || {};
+  if (valeur) memo[e.rel] = valeur; else delete memo[e.rel];
+  ls.set('spoils', memo);
+  ecrireBientot(a);
+  peindreSeries();
+  peindreEdit();
+  if (valeur && $('#auto').checked) setTimeout(() => suivant(1, true), 220);
+}
+function ecrireBientot(a){
+  clearTimeout(A.attente.get(a.key));
+  A.attente.set(a.key, setTimeout(() => ecrireFiche(a), 400));
+}
+/* Le fichier est relu juste avant d'ecrire: la bibliotheque a pu y poser
+   une progression ou une note entre-temps, on n'y touche pas. */
+async function ecrireFiche(a){
+  A.attente.delete(a.key);
+  const dir = A.dirs.get(a.key);
+  if (!dir) return toast('Dossier de « ' + a.title + ' » introuvable', 'bad');
+  try {
+    const d = await lireFiche(a);
+    if (!Object.keys(d).length){ d.version = 1; d.serie = a.key; }
+    if (Object.keys(a.spoils).length) d.spoil_edits = Object.assign({}, a.spoils);
+    else delete d.spoil_edits;
+    const fh = await dir.getFileHandle(FICHE, { create:true });
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify(d, null, 2));
+    await w.close();
+    a.fiche = d;
+  } catch(e){
+    console.warn(e);
+    toast('Écriture de ' + FICHE + ' impossible : le dossier est-il ouvert en écriture ?', 'bad');
+  }
+}
+addEventListener('beforeunload', () => { for (const k of A.attente.keys()){ const a = A.series.find(s => s.key === k); if (a) ecrireFiche(a); } });
+
+/* --------------------------------------------------------- l'ecran -- */
+function peindreSeries(){
+  let total = 0, faits = 0;
+  $('#series').innerHTML = '<h3>Œuvres</h3>' + A.series.map(a => {
+    const n = a.edits.length, f = fait(a), libre = !a.episodes.length;
+    if (!libre){ total += n; faits += f; }
+    return '<button class="serie' + (A.serie === a ? ' on' : '') + (!libre && f === n ? ' fini' : '') + '" data-serie="' + esc(a.key) + '"' +
+      (libre ? ' disabled title="Pas d\'épisode dans la bibliothèque : ses edits ne sont jamais masqués"' : '') + '>' +
+      '<span class="vign" data-art="' + esc(a.key) + '"></span>' +
+      '<span><b>' + esc(a.title) + '</b><small>' + (libre ? n + (n > 1 ? ' edits' : ' edit') + ' · rien à cacher' : f + ' / ' + n + ' annotés')
+ + '</small>' +
+      (libre ? '' : '<span class="jauge"><i style="width:' + Math.round(100 * f / n) + '%"></i></span>') + '</span></button>';
+  }).join('');
+  $('#total').innerHTML = '<b>' + faits + '</b> / ' + total + ' edits annotés';
+  for (const el of document.querySelectorAll('[data-art]')) poserJaquette(el);
+}
+const jaquettes = new Map();
+async function poserJaquette(el){
+  const a = A.series.find(s => s.key === el.dataset.art);
+  if (!a || !a.art) return;
+  let url = jaquettes.get(a.key);
+  if (!url){
+    try { url = URL.createObjectURL(await a.art.ref.handle.getFile()); } catch(e){ return; }
+    jaquettes.set(a.key, url);
+  }
+  el.style.backgroundImage = 'url("' + url + '")';
+}
+$('#series').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-serie]');
+  if (b && !b.disabled) choisirSerie(b.dataset.serie);
+});
+
+function choisirSerie(key){
+  A.serie = A.series.find(a => a.key === key) || null;
+  if (!A.serie) return;
+  const premier = A.serie.edits.findIndex(e => !annotation(A.serie, e));
+  A.i = premier >= 0 ? premier : 0;
+  peindreSeries();
+  peindreSaisons();
+  montrer();
+}
+function peindreSaisons(){
+  const a = A.serie;
+  $('#saisons').innerHTML = a.seasonList.map(s =>
+    '<div class="saison"><h4>' + esc(s.label || 'Épisodes') + '</h4><div class="grille">' +
+    s.eps.map((ep, k) => {
+      const n = ep.ep != null ? ep.ep : k + 1;
+      return '<button class="ep" data-ep="' + esc(court(a, ep)) + '" title="' + esc((s.label ? s.label + ' · ' : '') + 'Épisode ' + n + (ep.title ? ' — ' + ep.title : '')) + '">' + n + '</button>';
+    }).join('') + '</div></div>').join('');
+}
+$('#saisons').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-ep]');
+  if (b) annoter(b.dataset.ep);
+});
+$('#aucun').addEventListener('click', () => annoter('aucun'));
+$('#effacer').addEventListener('click', () => annoter(''));
+
+function nomEpisode(a, c){
+  const ep = a.episodes.find(e => court(a, e) === c);
+  if (!ep) return 'un épisode qui n\'est plus sur le disque';
+  const s = a.seasonList.find(x => x.key === ep.seasonKey);
+  const n = ep.ep != null ? ep.ep : s.eps.indexOf(ep) + 1;
+  return (s && s.label ? s.label + ' · ' : '') + 'épisode ' + n + (ep.title && !/^épisode/i.test(ep.title) ? ' — ' + ep.title : '');
+}
+function peindreEdit(){
+  const a = A.serie, e = a.edits[A.i];
+  const v = annotation(a, e);
+  $('#nom').textContent = e.title + ' · ' + a.title;
+  $('#fich').textContent = e.name;
+  const etat = $('#etat');
+  etat.className = 'etat' + (v === 'aucun' ? ' libre' : v ? ' ok' : '');
+  etat.textContent = v === 'aucun' ? 'Aucun spoil' : v ? 'Annoté' : 'À faire';
+  $('#actuel').innerHTML = v === 'aucun' ? '<b>Aucun spoil</b> : visible tout de suite.'
+    : v ? 'Montre jusqu\'à <b>' + esc(nomEpisode(a, v)) + '</b>.'
+    : 'Pas encore annoté : il reste masqué tant que la série n\'est pas finie.';
+  $('#pos').textContent = (A.i + 1) + ' / ' + a.edits.length;
+  $('#aucun').classList.toggle('on', v === 'aucun');
+  // la place de chaque episode par rapport au choix: avant lui, c'est ce qu'il faut avoir vu
+  const rang = v && v !== 'aucun' ? a.episodes.findIndex(x => court(a, x) === v) : -1;
+  for (const b of document.querySelectorAll('#saisons [data-ep]')){
+    const ep = a.episodes.find(x => court(a, x) === b.dataset.ep);
+    const pg = ls.get('pg.' + ep.rel, null);
+    b.classList.toggle('vu', !!(pg && pg.done));
+    b.classList.toggle('on', b.dataset.ep === v);
+    b.classList.toggle('avant', rang >= 0 && ep.idx < rang);
+  }
+  $('#pellicule').innerHTML = a.edits.map((x, k) =>
+    '<button data-i="' + k + '" class="' + (annotation(a, x) ? 'ok' : '') + (k === A.i ? ' on' : '') + '" title="' + esc(x.title) + '">' + (k + 1) + '</button>').join('');
+  const sel = $('#pellicule .on');
+  if (sel) sel.scrollIntoView({ block:'nearest', inline:'center' });
+}
+$('#pellicule').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-i]');
+  if (b){ A.i = +b.dataset.i; montrer(); }
+});
+
+async function montrer(){
+  const a = A.serie, e = a.edits[A.i];
+  peindreEdit();
+  const vid = $('#vid');
+  vid.pause();
+  if (A.url){ URL.revokeObjectURL(A.url); A.url = null; }
+  const bad = $('#ecran .illisible');
+  if (bad) bad.remove();
+  let f = e.ref.file;
+  try { if (!f) f = await e.ref.handle.getFile(); } catch(err){ return illisible(); }
+  if (A.serie !== a || a.edits[A.i] !== e) return;   // on a deja change d'edit
+  A.url = URL.createObjectURL(f);
+  vid.src = A.url;
+  vid.muted = ls.get('annMute', true) !== false;
+  peindreSon();
+  vid.play().then(() => $('#ecran').classList.remove('arret'))
+            .catch(() => $('#ecran').classList.add('arret'));
+}
+function illisible(){
+  $('#ecran').insertAdjacentHTML('beforeend', '<div class="illisible">Cette vidéo ne se lit pas dans le navigateur.<br>Tu peux quand même l\'annoter.</div>');
+}
+$('#vid').addEventListener('error', () => { if ($('#vid').getAttribute('src')) illisible(); });
+$('#vid').addEventListener('play',  () => $('#ecran').classList.remove('arret'));
+$('#vid').addEventListener('pause', () => $('#ecran').classList.add('arret'));
+function basculer(){ const v = $('#vid'); if (!v.getAttribute('src')) return; v.paused ? v.play().catch(() => {}) : v.pause(); }
+$('#ecran').addEventListener('click', (ev) => { if (!ev.target.closest('#son')) basculer(); });
+
+const SON  = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 8.5a4.5 4.5 0 0 1 0 7"/></svg>';
+const MUET = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="m17 9 5 6m0-6-5 6"/></svg>';
+function peindreSon(){ const m = $('#vid').muted; $('#son').innerHTML = m ? MUET : SON; $('#son').setAttribute('aria-label', m ? 'Activer le son' : 'Couper le son'); }
+function basculerSon(){ const v = $('#vid'); v.muted = !v.muted; ls.set('annMute', v.muted); peindreSon(); }
+$('#son').addEventListener('click', basculerSon);
+
+/* Suivant: avec « seulement ceux a faire », on saute ce qui est deja annote.
+   Arrive au bout d'une oeuvre complete, on passe a la prochaine qui reste. */
+function suivant(d, apresChoix){
+  const a = A.serie;
+  if (!a) return;
+  const seulement = $('#afaire').checked || apresChoix;
+  for (let k = A.i + d; k >= 0 && k < a.edits.length; k += d){
+    if (!seulement || !annotation(a, a.edits[k])){ A.i = k; return montrer(); }
+  }
+  if (apresChoix){
+    const reste = A.series.find(s => s.episodes.length && fait(s) < s.edits.length);
+    if (reste && reste !== a){ toast('« ' + a.title + ' » est fini, on passe à « ' + reste.title + ' »'); return choisirSerie(reste.key); }
+    if (!reste) return toast('Tous les edits sont annotés', 'ok');
+    const k = a.edits.findIndex(e => !annotation(a, e));
+    if (k >= 0){ A.i = k; return montrer(); }
+  }
+}
+$('#prec').addEventListener('click', () => suivant(-1));
+$('#suiv').addEventListener('click', () => suivant(1));
+
+addEventListener('keydown', (ev) => {
+  if (!A.serie || ev.target.matches('input')) return;
+  if (ev.key === 'ArrowRight'){ ev.preventDefault(); suivant(1); }
+  else if (ev.key === 'ArrowLeft'){ ev.preventDefault(); suivant(-1); }
+  else if (ev.key === ' '){ ev.preventDefault(); basculer(); }
+  else if (ev.key.toLowerCase() === 'm'){ basculerSon(); }
+  else if (ev.key === '0'){ annoter('aucun'); }
+  else if (ev.key === 'Delete' || ev.key === 'Backspace'){ ev.preventDefault(); annoter(''); }
+});
+
+demarrer();
+</script>
+</body>
+</html>

@@ -342,7 +342,8 @@ function cleanupSource(){
 }
 
 function closePlayer(){
-  saveNow();
+  finirEpisode(false);
+
   flushProgress();
   cleanupSource();
   P.hidden = true;
@@ -554,12 +555,17 @@ function scrubAt(ev){
    temps survolé et on recopie l'image dans la bulle. Les .ts n'y passent pas,
    le navigateur ne sait pas les décoder hors du lecteur. */
 let peekV = null, peekWant = null, peekBusy = false, peekFor = null;
+let peekShown = null, peekCible = 0;     // le temps de l'image dans la bulle, et celui sous la souris
+/* L'image est-elle assez proche de la souris pour s'y fier? */
+function peekJuste(){
+  return peekShown != null && Math.abs(peekShown - peekCible) <= Math.max(8, (V.duration || 0) / 150);
+}
 function peekable(){
   return !!(S.current && S.current.play === 'native' && S.srcUrl && V.duration);
 }
 function dropPeek(){
   if (peekV){ peekV.removeAttribute('src'); try { peekV.load(); } catch(e){} }
-  peekV = null; peekFor = null; peekWant = null; peekBusy = false;
+  peekV = null; peekFor = null; peekWant = null; peekBusy = false; peekShown = null;
 }
 function peekVideo(){
   if (peekV && peekFor === S.srcUrl) return peekV;
@@ -585,7 +591,8 @@ function pumpPeek(){
   const draw = () => {
     peekBusy = false;
     const c = $('#sThumb'), ctx = c.getContext('2d');
-    try { ctx.drawImage(v, 0, 0, c.width, c.height); } catch(e){}
+    try { ctx.drawImage(v, 0, 0, c.width, c.height); peekShown = v.currentTime; } catch(e){}
+    $('#sBubble').classList.toggle('attente', !peekJuste());
     pumpPeek();
   };
   const give = setTimeout(() => { peekBusy = false; }, 2500);
@@ -603,7 +610,14 @@ scrub.addEventListener('pointermove', (ev) => {
   const x = Math.max(half, Math.min(r.width - half, p * r.width));
   b.style.left = x + 'px';
   $('#sTime').textContent = fmtTime(p * d);
-  if (peekable()){ peekWant = p * d; pumpPeek(); }
+  if (peekable()){
+    // une image a plus de quelques secondes de la souris montre autre chose
+    peekCible = p * d;
+    b.classList.toggle('attente', !peekJuste());
+    peekWant = p * d; pumpPeek();
+
+  }
+
 });
 scrub.addEventListener('pointerleave', () => { peekWant = null; });
 let dragging = false;
@@ -804,9 +818,22 @@ function showNext(){
   nextT = setTimeout(tick, 1000);
 }
 function hideNext(){ clearTimeout(nextT); $('#nextCard').classList.remove('on'); }
+/* Quitter un episode dans sa fin le compte comme vu: le generique de fin
+   entame, ou — quand on demande la suite — plus des quatre cinquiemes. Sans
+   ca, la touche N pendant le generique laissait l'episode « en cours », et
+   les edits annotes sur lui restaient caches. */
+function finirEpisode(versLaSuite){
+  const ep = S.current, d = V.duration, t = V.currentTime;
+  if (!ep || !d || !isFinite(d)) return;
+  const fin = getSeg(ep, 'fin');
+  const dansLaFin = (segReady(fin) && t >= fin.start - 5) || (versLaSuite && t / d >= .8);
+  setProgress(ep, dansLaFin ? d : t, d);
+  flushProgress();
+}
 function playNext(force){
   const n = nextEpisode();
   hideNext();
+  finirEpisode(true);
   if (!n) { if (force) toast('Dernier épisode de la série'); else closePlayer(); return; }
   openPlayer(n);
 }

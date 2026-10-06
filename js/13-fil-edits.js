@@ -518,8 +518,11 @@ function edRetrier(){
      dont l'essentiel des mesures est deja passe serait mal estimee ici. On ne
      garde ensuite que ce qui appartient a la queue. */
   const aRevoir = new Set(edCtx.list.slice(depart).map(e => e.rel));
-  const queue = fileEdits(edCtx.list, edVus(), edContexte()).list
-                  .filter(e => aRevoir.has(e.rel));
+  let queue = fileEdits(edCtx.list, edVus(), edContexte()).list
+                .filter(e => aRevoir.has(e.rel));
+  // depuis une oeuvre, le retri garde les nouveaux debloques devant
+  if (edCtx.priorite) queue = prioriserDebloques(queue, filtrerSpoils(queue).place);
+
   const rail = $('#edRail');
   for (let j = 0; j < queue.length; j++){
     const e = queue[j];
@@ -539,13 +542,84 @@ function edVideo(i){ const s = edSlide(i); return s ? s.querySelector('video') :
 function openEdits(key, depart){
   const a = S.byKey.get(key);
   if (!a || !a.edits.length) return toast('Aucun edit dans cette série', 'bad');
-  edOuvrir(a.edits, a.title, depart);
+  edSpoilsVisibles = false;
+  edOuvrir(a.edits, a.title, depart, null, true);
 }
 /** Le fil de la bibliothèque entière: chaque edit annonce son œuvre en haut. */
 function openEditsTous(depart){
   const edits = S.animes.flatMap(a => a.edits);
   if (!edits.length) return toast('Aucun edit dans la bibliothèque', 'bad');
+  edSpoilsVisibles = false;
   edOuvrir(edits, 'Tous les edits', depart);
+}
+/* ------------------------------------------------- sans spoiler -------
+ * Un edit montre l'histoire jusqu'a un episode, note dans annoter-edits.html.
+ * Tant que cet episode n'est pas vu jusqu'au bout, l'edit reste hors du fil.
+ * Un edit pas encore annote compte comme s'il montrait toute la serie: il
+ * n'arrive qu'une fois la serie finie. Une oeuvre sans episode n'a rien a
+ * gacher. Le bouton en haut a droite les montre tous, le temps d'une
+ * ouverture: chaque fil repart protege.
+ */
+let edSpoilsVisibles = false;
+function filtrerSpoils(edits){
+  const spoils = spoilMap(), series = new Map();
+  const garder = [], place = new Map();      // edit -> { jusque, vu }: ou il en est, ou on en est
+  let caches = 0;
+  for (const e of edits){
+    const a = S.byKey.get(e.anime);
+    if (!a || !a.episodes.length){ garder.push(e); continue; }
+    let s = series.get(a.key);
+    if (!s){
+      let vu = -1;
+      for (const ep of a.episodes){ const p = getProgress(ep); if (p && p.done && ep.idx > vu) vu = ep.idx; }
+      const rang = new Map(a.episodes.map(ep => [ep.rel.slice(a.key.length + 1), ep.idx]));
+      s = { vu, rang, fin: a.episodes.length - 1 };
+      series.set(a.key, s);
+    }
+    const v = spoils[e.rel];
+    // un episode disparu du disque: on ne sait plus, on suppose le pire
+    const jusque = v === 'aucun' ? -1 : (v && s.rang.has(v) ? s.rang.get(v) : s.fin);
+    place.set(e.rel, { jusque, vu: s.vu });
+    if (jusque <= s.vu) garder.push(e); else caches++;
+  }
+  return { garder, caches, place };
+}
+/* Depuis la fiche d'une oeuvre, ce que les derniers episodes vus viennent
+ * d'ouvrir passe devant: les edits pas encore vus et debloques, du plus avance
+ * dans l'histoire au moins avance — l'episode 21 juste regarde d'abord, les
+ * « aucun spoil » en dernier, eux etaient la depuis le debut. A episode egal,
+ * l'ordre de l'algorithme tient (le tri est stable). Tout le reste suit dans
+ * son ordre a lui, y compris ce que le bouton Spoilers montre en plus: un edit
+ * encore verrouille ne passe jamais devant. Le fil de toute la bibliotheque,
+ * lui, garde l'algorithme seul. */
+function prioriserDebloques(list, place){
+  const vus = edVus(), tete = [], reste = [];
+  for (const e of list){
+    const p = place.get(e.rel);
+    if (p && !vus[e.rel] && p.jusque <= p.vu) tete.push(e); else reste.push(e);
+  }
+  tete.sort((x, y) => place.get(y.rel).jusque - place.get(x.rel).jusque);
+  return tete.concat(reste);
+}
+function paintEdSpoil(caches){
+  const b = $('#edSpoil');
+  b.classList.toggle('on', edSpoilsVisibles);
+  b.setAttribute('aria-pressed', edSpoilsVisibles ? 'true' : 'false');
+  $('#edSpoilTxt').textContent = edSpoilsVisibles ? 'Spoilers visibles'
+    : caches ? fmtCount(caches, 'masqué', 'masqués') : 'Sans spoiler';
+  b.title = edSpoilsVisibles ? 'Remasquer les edits qui spoilent la suite'
+    : caches ? 'Afficher aussi les edits qui spoilent la suite' : 'Aucun edit ne spoile ce que tu as vu';
+}
+function edBasculerSpoils(){
+  if (!edCtx) return;
+  edSpoilsVisibles = !edSpoilsVisibles;
+  const courant = edCtx.list[edCtx.i];
+  edDwellFin();
+  edStatsEcrire();
+  clearTimeout(edCibleT); edCible = null;
+  clearTimeout(edVuT);
+  edFree(new Set());
+  edOuvrir(edCtx.tous, edCtx.defaut, 0, courant && courant.rel, edCtx.priorite);
 }
 /**
  * Le nom de l'œuvre, en haut à gauche. Dans le fil global il change à chaque
@@ -558,17 +632,30 @@ function edPeindreNom(e){
   b.textContent = a ? a.title : (edCtx ? edCtx.defaut : '');
   if (a) b.setAttribute('data-anime', a.key); else b.removeAttribute('data-anime');
 }
-function edOuvrir(edits, defaut, depart){
+function edOuvrir(edits, defaut, depart, garderRel, priorite){
   edPurgerStats();
-  const file = fileEdits(edits, edVus(), edContexte());
+  const tous = edits;
+  const tri = filtrerSpoils(edits);
+  if (edSpoilsVisibles){ tri.garder = edits; tri.caches = 0; }
+  const file = fileEdits(tri.garder, edVus(), edContexte());
+  if (priorite) file.list = prioriserDebloques(file.list, tri.place);
   const revus = file.list.length - file.neufs;
-  edCtx = { list: file.list, i: -1, defaut };
+  edCtx = { list: file.list, i: -1, defaut, tous, priorite: !!priorite };
+  paintEdSpoil(tri.caches);
   ED.hidden = false;
   document.body.style.overflow = 'hidden';
   edPeindreNom(null);
   $('#edSub').textContent = fmtCount(file.list.length, 'edit', 'edits') +
     (!revus ? '' : file.neufs ? ' · ' + file.neufs + ' nouveau' + (file.neufs > 1 ? 'x' : '') + ' en tête'
                               : ' · tous déjà vus');
+  if (!edCtx.list.length){
+    // tout spoile la suite: le fil s'ouvre quand meme, pour le bouton du haut
+    $('#edCount').textContent = '0 / 0';
+    $('#edRail').innerHTML = '<section class="ed-slide ed-vide"><div class="ed-bad">' +
+      'Ces edits montrent des épisodes que tu n\'as pas encore vus.<br>' +
+      'Regarde la suite, ou affiche les spoilers en haut à droite.</div></section>';
+    return;
+  }
   $('#edHint').hidden = true;
   $('#edProg').style.width = '0';
   $('#edRail').innerHTML = edCtx.list.map((e,i) =>
@@ -581,7 +668,8 @@ function edOuvrir(edits, defaut, depart){
   paintEdMute();
   paintEdRate();
   paintEdAime(false);
-  const start = Math.max(0, Math.min(edCtx.list.length - 1, depart | 0));
+  const garde = garderRel ? edCtx.list.findIndex(e => e.rel === garderRel) : -1;
+  const start = garde >= 0 ? garde : Math.max(0, Math.min(edCtx.list.length - 1, depart | 0));
   edGo(start, false);
   edObserve();
 }
@@ -742,6 +830,8 @@ function paintEdMute(){
 }
 
 $('#edClose').addEventListener('click', closeEdits);
+$('#edSpoil').addEventListener('click', edBasculerSpoils);
+
 $('#edJaime').addEventListener('click', edBasculerAime);
 $('#edMute').addEventListener('click', () => {
   store.set('edMute', !edMuted());

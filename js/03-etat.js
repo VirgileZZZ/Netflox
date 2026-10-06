@@ -26,7 +26,10 @@ const S = {
   canWrite: false,
   shared: false,           // vrai sur une bibliotheque partagee: lecture seule
   host: { cats:{}, favs:{}, intro:{}, outro:{}, notes:{}, epNotes:{},
-           imdb:{}, epImdb:{}, descs:{}, titres:{} },  // ce que l'hote a range, tel quel
+           imdb:{}, epImdb:{}, descs:{}, titres:{}, spoils:{} },  // ce que l'hote a range, tel quel
+  invites: {},             // « s:cle » / « e:chemin » -> { invite: note }, les votes des invites
+  peutNoter: false,        // partage: le serveur accepte les notes (repond a /__moi)
+  estHote: false,          // partage: c'est la machine de l'hote qui regarde
   httpBase: null,
   rootName: '',
   view: 'home',
@@ -182,6 +185,18 @@ function appliquerTitres(){
     if (t) e.title = t;
   }
 }
+/* ------------------------------------------- spoilers des edits ---- */
+/* Jusqu'ou un edit montre l'histoire, pose dans annoter-edits.html: le chemin
+   de l'edit donne l'episode (chemin sous la serie, Â« saison1/x_5.mp4 Â») ou
+   'aucun'. Relu a chaque ouverture du fil, sans cache: l'autre page ecrit dans
+   la meme table pendant que celle-ci est ouverte. */
+function spoilMap(){ return S.shared ? S.host.spoils : (store.get('spoils', {}) || {}); }
+function setSpoilsSerie(key, depuisFichier){
+  const all = store.get('spoils', {}) || {};
+  for (const [court, v] of Object.entries(depuisFichier || {}))
+    if (typeof v === 'string' && v) all[key + '/' + court] = v;
+  store.set('spoils', all);
+}
 function imdbOf(key){ return normNote(imdbMap()[key]); }
 function epImdbOf(rel){ return normNote(epImdbMap()[rel]); }
 function descOf(key){ const d = descMap()[key]; return typeof d === 'string' ? d : ''; }
@@ -209,11 +224,58 @@ function setDesc(key, texte){
   store.set('descs', all);
   saveSidecar(key);
 }
-/* Les deux notes pesent pareil: leur moyenne. Si je n'ai pas note, il reste
-   celle d'IMDb — et l'inverse pour une serie qu'IMDb ne connait pas. */
-function melange(mine, imdb){
-  if (mine && imdb) return Math.round((mine + imdb) * 5) / 10;
-  return mine || imdb || 0;
+/* ------------------------------------------------ trois voix --------
+ * Une note se fait a trois: IMDb, l'hote, et les invites. Ce qui s'affiche est
+ * leur moyenne, a parts egales — sauf pour les invites, dont la voix pese
+ * selon leur accord avec les deux autres.
+ *
+ * Chaque vote d'invite compte d'autant moins qu'il s'ecarte de la moyenne
+ * IMDb/hote: exp(-(ecart / 1,2)^2), soit moitie a un point, un seizieme a deux,
+ * presque rien a trois. La voix des invites, elle, pese au plus autant qu'une
+ * des deux autres, et seulement a hauteur de ses votes credibles: des votes
+ * tous farfelus ne font pas une categorie. Sans IMDb ni note de l'hote, il
+ * n'y a pas de reference: chaque vote compte plein.
+ */
+const ECART_INVITES = 1.2;
+function voixInvites(votes, ref){
+  let somme = 0, poids = 0, n = 0;
+  for (const v of Object.values(votes || {})){
+    const x = normNote(v);
+    if (!x) continue;
+    const p = ref ? Math.exp(-Math.pow((x - ref) / ECART_INVITES, 2)) : 1;
+    somme += p * x; poids += p; n++;
+  }
+  return n ? { v: somme / poids, w: Math.min(1, poids), n } : null;
+}
+function melange(mine, imdb, inv){
+  let s = 0, w = 0;
+  if (mine){ s += mine; w += 1; }
+  if (imdb){ s += imdb; w += 1; }
+  if (inv){ s += inv.v * inv.w; w += inv.w; }
+  return w ? Math.round(s / w * 10) / 10 : 0;
+}
+/** Le navigateur d'un invite: un identifiant tire une fois, pour qu'il ait un
+    vote par episode, qu'il peut changer ou retirer. */
+function inviteId(){
+  let id = store.get('inviteId', null);
+  if (!id){
+    id = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('');
+    store.set('inviteId', id);
+  }
+  return id;
+}
+/** Les votes des invites d'une serie, tels que notes-invites.json les range. */
+function adopterInvites(key, d){
+  for (const k of Object.keys(S.invites)) if (k.slice(2).split('/')[0] === key) delete S.invites[k];
+  if (!d || typeof d !== 'object') return;
+  if (d.serie && typeof d.serie === 'object') S.invites['s:' + key] = Object.assign({}, d.serie);
+  for (const [rel, votes] of Object.entries(d.episodes || {}))
+    if (votes && typeof votes === 'object') S.invites['e:' + key + '/' + rel] = Object.assign({}, votes);
+}
+/** Ce que vaut l'avis de celui qui regarde: le sien, d'hote ou d'invite. */
+function noteDuSpectateur(cible, mine){
+  if (!S.shared || S.estHote) return mine;
+  return normNote((S.invites[cible] || {})[inviteId()]);
 }
 /* 0 = pas de note. Tout le reste est ramene dans 1..10, a une decimale:
    les notes reprises d'IMDb en ont une, et l'arrondir a l'entier ferait d'un
@@ -246,7 +308,7 @@ function setEpNote(rel, n){
 function epNoteAvg(a){
   let somme = 0, n = 0;
   for (const e of a.episodes){
-    const v = melange(epNoteOf(e.rel), epImdbOf(e.rel));
+    const v = noteCible('e:' + e.rel).note;
     if (v){ somme += v; n++; }
   }
   return n ? Math.round(somme / n * 10) / 10 : 0;
@@ -255,16 +317,17 @@ function epNoteAvg(a){
 function noteCible(cible){
   const genre = String(cible).slice(0, 1);
   const id    = String(cible).slice(2);
-  if (genre === 'e'){
-    const mine = epNoteOf(id), imdb = epImdbOf(id);
-    return { id, ep:true, mine, imdb, note: melange(mine, imdb), auto:false };
-  }
-  const mine = noteOf(id), imdb = imdbOf(id);
-  const note = melange(mine, imdb);
-  const a = S.byKey.get(id);
-  if (note || !a) return { id, ep:false, mine, imdb, note, auto:false };
-  // ni l'un ni l'autre: restent les episodes, s'il y en a de notes
-  return { id, ep:false, mine:0, imdb:0, note: epNoteAvg(a), auto:true };
+  const ep = genre === 'e';
+  const mine = ep ? epNoteOf(id) : noteOf(id), imdb = ep ? epImdbOf(id) : imdbOf(id);
+  const ref = mine && imdb ? (mine + imdb) / 2 : (mine || imdb);
+  const inv = voixInvites(S.invites[cible], ref);
+  const note = melange(mine, imdb, inv);
+  const perso = noteDuSpectateur(cible, mine);
+  const a = ep ? null : S.byKey.get(id);
+  if (ep || note || !a) return { id, ep, mine, imdb, inv, perso, note, auto:false };
+  // personne n'a note la serie: restent ses episodes, s'il y en a de notes
+  return { id, ep:false, mine:0, imdb:0, inv:null, perso, note: epNoteAvg(a), auto:true };
+
 }
 function noteTri(a){ return noteCible('s:' + a.key).note; }
 
@@ -310,7 +373,8 @@ function renommerSerie(ancien, nouveau){
   }
   // les tables, indexees par serie ou par chemin d'episode
   for (const nom of ['cats','favs','notes','imdb','descs','titres',
-                     'epnotes','epimdb','edvus','edstats']){
+                     'epnotes','epimdb','edvus','edstats','spoils']){
+
     const t = store.get(nom, null);
     if (!t || typeof t !== 'object') continue;
     let touche = false;
