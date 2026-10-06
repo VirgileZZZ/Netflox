@@ -608,8 +608,10 @@ function paintEdSpoil(caches){
   const b = $('#edSpoil');
   b.classList.toggle('on', edSpoilsVisibles);
   b.setAttribute('aria-pressed', edSpoilsVisibles ? 'true' : 'false');
-  $('#edSpoilTxt').textContent = edSpoilsVisibles ? 'Spoilers visibles'
-    : caches ? fmtCount(caches, 'masqué', 'masqués') : 'Sans spoiler';
+  // le bouton dit ce qu'il fait, pas seulement un etat
+  $('#edSpoilTxt').textContent = edSpoilsVisibles ? 'Remasquer'
+    : caches ? 'Voir ' + fmtCount(caches, 'spoiler', 'spoilers') : 'Sans spoiler';
+
   b.title = edSpoilsVisibles ? 'Remasquer les edits qui spoilent la suite'
     : caches ? 'Afficher aussi les edits qui spoilent la suite' : 'Aucun edit ne spoile ce que tu as vu';
 }
@@ -702,7 +704,21 @@ function edRendre(caches, start){
   paintEdAime(false);
   edGo(Math.max(0, Math.min(edCtx.list.length - 1, start | 0)), false);
   edObserve();
+  edAidePremiereFois();
 }
+/* La premiere fois, on dit comment ca marche: rien ne l'indiquait. */
+function edAidePremiereFois(){
+  if (store.get('edAide', false)) return;
+  store.set('edAide', true);
+  const d = document.createElement('div');
+  d.className = 'ed-aide';
+  d.innerHTML = '<div><span class="fleche">↑</span><b>Fais défiler pour l\u2019edit suivant</b>' +
+    '<span>Touche la vidéo pour la mettre en pause, et le cœur pour l\u2019aimer. ' +
+    'Le nom en haut ouvre la fiche de l\u2019œuvre.</span><span style="color:var(--dim)">Touche pour commencer</span></div>';
+  d.addEventListener('pointerdown', (ev) => { ev.preventDefault(); d.remove(); }, { once: true });
+  ED.appendChild(d);
+}
+
 
 function closeEdits(){
   edDwellFin();
@@ -848,7 +864,7 @@ function edBasculerAime(){
   s.j = s.j ? 0 : Date.now();
   edStatsMarquer();
   paintEdAime(true);
-  toast(s.j ? 'Ajoute a tes coups de coeur' : 'Retire de tes coups de coeur', s.j ? 'ok' : '');
+  toast(s.j ? 'Ajouté à tes coups de cœur' : 'Retiré de tes coups de cœur', s.j ? 'ok' : '');
 }
 function paintEdAime(anime){
   const b = $('#edJaime');
@@ -1006,11 +1022,24 @@ $('#edRail').addEventListener('timeupdate', (ev) => {
 function edIllisible(s){
   if (!s || s.querySelector('.ed-bad')) return;
   const e = edCtx && edCtx.list[+s.dataset.i];
-  if (e) edDwellEchec(e.rel);
-  s.insertAdjacentHTML('beforeend',
-    '<div class="ed-bad">Ce fichier ne se lit pas dans le navigateur' +
-    (e ? '<br>' + esc(e.name) : '') + '</div>');
+  const v = s.querySelector('video');
+  // une coupure reseau n'est pas un fichier illisible: on ne le compte pas contre l'edit
+  const reseau = !navigator.onLine || (v && v.error && v.error.code === 2);
+  if (e && !reseau) edDwellEchec(e.rel);
+  s.insertAdjacentHTML('beforeend', reseau
+    ? '<div class="ed-bad">Connexion perdue<br>L\u2019edit reprendra tout seul au retour du réseau</div>'
+    : '<div class="ed-bad">Ce fichier ne se lit pas dans le navigateur' + (e ? '<br>' + esc(e.name) : '') + '</div>');
 }
+/* Le reseau revient: les diapos tombees en panne se rechargent, et l'edit
+   en cours repart. Avant, plus rien ne bougeait apres une coupure. */
+addEventListener('online', () => {
+  if (!edCtx || ED.hidden || edCtx.i < 0) return;
+  $$('.ed-bad', $('#edRail')).forEach(el => el.remove());
+  edFree(new Set());
+  for (let j = edCtx.i - 1; j <= edCtx.i + 2; j++) if (j >= 0 && j < edCtx.list.length) edLoad(j);
+  edPlay(edCtx.i);
+});
+
 $('#edRail').addEventListener('error', (ev) => {
   const v = ev.target;
   const s = v.closest && v.closest('.ed-slide');
@@ -1035,7 +1064,9 @@ $('#edRail').addEventListener('loadedmetadata', (ev) => {
 }, true);
 
 addEventListener('keydown', (ev) => {
-  if (ED.hidden || ev.target.matches('input,textarea')) return;
+  if (ED.hidden || ev.ctrlKey || ev.metaKey || ev.altKey || ev.target.matches('input,textarea,select')) return;
+  if (ev.key === ' ' && ev.target.closest('button,[role=slider]')) return;
+
   const k = ev.key.toLowerCase();
   if (ev.key === 'ArrowDown' || ev.key === 'ArrowRight' || k === 'j'){ ev.preventDefault(); edStep(1); }
   else if (ev.key === 'ArrowUp' || ev.key === 'ArrowLeft' || k === 'k'){ ev.preventDefault(); edStep(-1); }

@@ -63,17 +63,32 @@ function adopterFiches(fiches){
    en lecture seule, comme elles l'etaient. */
 async function demanderQuiJeSuis(){
   try {
-    const r = await fetch('__moi', { cache:'no-store' });
+    const r = await fetch('__moi?i=' + encodeURIComponent(inviteId()), { cache:'no-store' });
     const d = r.ok ? await r.json() : null;
     if (!d || typeof d.hote !== 'boolean') return;
     S.peutNoter = true;
     S.estHote = d.hote;
+    S.monVote = d.monVote || null;
+    // rescanner le dossier de l'hote ne veut rien dire pour un invite
+    const rf = $('#btnRefresh'); if (rf) rf.hidden = !d.hote;
+
     majNotes();
     compteAuDemarrage(d);
 
   } catch(e){}
 }
+/* Apres une connexion, l'identifiant de vote peut avoir change (celui du
+   compte): on redemande son empreinte, pour retrouver ses notes. */
+async function rafraichirMonVote(){
+  try {
+    const d = await (await fetch('__moi?i=' + encodeURIComponent(inviteId()), { cache:'no-store' })).json();
+    S.monVote = d.monVote || null;
+    S.estHote = !!d.hote;
+    majNotes();
+  } catch(e){}
+}
 /** Une note posee depuis un lien de partage part chez l'hote. On l'affiche
+
     tout de suite, et on la retire si le serveur la refuse. */
 async function envoyerNote(cible, val){
   const avant = S.estHote ? null : Object.assign({}, S.invites[cible] || {});
@@ -83,7 +98,8 @@ async function envoyerNote(cible, val){
   const poser = (v) => {
     if (table){ if (v) table[id] = v; else delete table[id]; return; }
     const votes = S.invites[cible] || (S.invites[cible] = {});
-    if (v) votes[inviteId()] = v; else delete votes[inviteId()];
+    const moi = S.monVote || inviteId();
+    if (v) votes[moi] = v; else delete votes[moi];
   };
   poser(val);
   majNotes();

@@ -30,6 +30,8 @@ const S = {
   invites: {},             // « s:cle » / « e:chemin » -> { invite: note }, les votes des invites
   peutNoter: false,        // partage: le serveur accepte les notes (repond a /__moi)
   estHote: false,          // partage: c'est la machine de l'hote qui regarde
+  monVote: null,           // partage: l'empreinte publiee de son identifiant de vote
+
   httpBase: null,
   rootName: '',
   view: 'home',
@@ -54,6 +56,9 @@ const store = (() => {
   let ok = true;
   try { localStorage.setItem('ad2.t','1'); localStorage.removeItem('ad2.t'); }
   catch(e){ ok = false; }
+  // navigation privee, stockage bloque: tout marche, mais rien ne sera garde — on le dit
+  if (!ok) setTimeout(() => toast('Ce navigateur ne garde rien (navigation privée ?) : ta progression sera perdue en fermant la page', 'bad'), 2000);
+
   return {
     get(k, d){
       try { const v = ok ? localStorage.getItem('ad2.'+k) : mem[k];
@@ -282,7 +287,8 @@ function adopterInvites(key, d){
 /** Ce que vaut l'avis de celui qui regarde: le sien, d'hote ou d'invite. */
 function noteDuSpectateur(cible, mine){
   if (!S.shared || S.estHote) return mine;
-  return normNote((S.invites[cible] || {})[inviteId()]);
+  // dans l'index, les votes sont ranges sous l'empreinte publiee de chacun
+  return normNote((S.invites[cible] || {})[S.monVote || inviteId()]);
 }
 /* 0 = pas de note. Tout le reste est ramene dans 1..10, a une decimale:
    les notes reprises d'IMDb en ont une, et l'arrondir a l'entier ferait d'un
@@ -458,7 +464,9 @@ function toast(msg, kind){
   el.textContent = msg;
   el.className = 'toast on' + (kind ? ' ' + kind : '');
   clearTimeout(toastT);
-  toastT = setTimeout(() => el.className = 'toast', 3200);
+  // une erreur reste plus longtemps: sur un telephone, 3 secondes passent inapercues
+  toastT = setTimeout(() => el.className = 'toast', kind === 'bad' ? 6000 : 3200);
+
 }
 /** Message avec un bouton, pour revenir sur un geste qui efface quelque chose. */
 function toastAction(msg, label, fn){

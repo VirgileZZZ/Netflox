@@ -24,7 +24,8 @@
    refont toutes seules, et pesent trop pour voyager. */
 const COMPTE_PREFIXES = /^(pg|rd|sc|oubli)\./;
 const COMPTE_CLES = new Set(['edvus', 'edstats', 'inviteId', 'sublang', 'subpos', 'vol', 'rate',
-                             'edMute', 'edVol', 'edRate', 'svMode', 'svFit', 'svDir', 'rsize']);
+                             'edMute', 'edVol', 'edRate', 'svMode', 'svFit', 'svDir', 'rsize', 'reglages']);
+
 function cleDuCompte(k){ return COMPTE_PREFIXES.test(k) || COMPTE_CLES.has(k); }
 
 const COMPTE = { dispo: false, actif: false, pseudo: '', sale: false, minuteur: 0, onglet: 'connexion',
@@ -113,10 +114,16 @@ function compteAuDemarrage(d){
     const ancien = store.get('inviteId', null);
     compteFusionner(d.compte.donnees);
     rattacherVotes(ancien);
+    if (ancien !== store.get('inviteId', null)) rafraichirMonVote();
     COMPTE.sale = true;
     compteSauver();                              // ce que ce navigateur avait en plus
     if (S.animes.length) render();               // sinon le scan en cours s'en chargera
 
+  } else if (COMPTE.dispo && !d.hote && store.keys().some(k => /^pg\./.test(k)) && !store.get('rappelCompte', false)){
+    // il a commence a regarder sans compte: une seule fois, on lui dit ce qu'il risque
+    store.set('rappelCompte', true);
+    setTimeout(() => toastAction('Crée un compte pour garder ta progression sur les prochains liens', 'Créer',
+                                 () => ouvrirCompte('inscription')), 4000);
   } else if (COMPTE.dispo && !d.hote && !store.keys().some(k => /^(pg|rd|sc)\./.test(k))){
     // un navigateur vierge: peut-etre un ami revenu par un nouveau lien
     setTimeout(() => toastAction('Déjà un compte ? Retrouve tes infos', 'Se connecter', () => ouvrirCompte('connexion')), 1500);
@@ -208,7 +215,9 @@ $('#comptePanel').addEventListener('click', async (ev) => {
   const o = ev.target.closest('[data-cp-onglet]');
   if (o){ COMPTE.onglet = o.dataset.cpOnglet; remplirCompte(); return; }
   if (ev.target.closest('[data-cp="deconnexion"]')){
+    if (!confirm('Te déconnecter ? Tes infos restent gardées dans ton compte.')) return;
     await compteSauver();
+
     try { await fetch('__compte/deconnexion', { method: 'POST' }); } catch(e){}
     COMPTE.actif = false; COMPTE.pseudo = '';
     paintCompte(); fermerCompte();
@@ -236,6 +245,8 @@ $('#comptePanel').addEventListener('submit', async (ev) => {
     const ancien = store.get('inviteId', null);
     compteFusionner(r.donnees); COMPTE.sale = true; compteSauver();
     rattacherVotes(ancien);
+    if (ancien !== store.get('inviteId', null)) rafraichirMonVote();
+
   }
 
   paintCompte(); fermerCompte();

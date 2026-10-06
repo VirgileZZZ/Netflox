@@ -21,7 +21,10 @@ Double-cliquer sur `partager.bat` (il faut Python) :
 - **local** : un lien `http://192.168.x.x:8000` pour le téléphone ou la télé connectés à la même box ;
 - **internet** : un lien Cloudflare temporaire, valable tant que la fenêtre reste ouverte (il faut `cloudflared`, sinon : `winget install --id Cloudflare.cloudflared`).
 
-La bibliothèque partagée est en lecture seule pour ceux qui l'ouvrent.
+Ceux qui l'ouvrent peuvent noter les épisodes et, s'ils le veulent, créer un compte (pseudo + mot de passe) pour retrouver leur progression sur les liens suivants. Le lien ne donne accès qu'aux vidéos, images, sous-titres et pistes : jamais à tes fichiers de données.
+
+Sur téléphone, Netflox s'installe comme une application (« Ajouter à l'écran d'accueil »).
+
 
 ## Ranger les fichiers
 
@@ -47,7 +50,9 @@ videos/
 
 | Fichier | À quoi ça sert |
 | :--- | :--- |
-| `annoter-edits.html` | Dit, pour chaque edit, jusqu'à quel épisode il montre l'histoire. Le fil d'edits ne montre ensuite que ceux qui ne spoilent rien de ce que tu n'as pas vu (bouton « Spoilers » en haut à droite pour tout voir). À ouvrir dans Chrome sur l'ordinateur des vidéos. |
+| `comptes.html` | Les comptes de tes potes : ce qu'ils ont vu et noté, nouveau mot de passe, déconnexion, renommage, suppression. Pendant que `partager.bat` tourne, ouvre `http://127.0.0.1:<port>/comptes.html` sur ton PC (jamais accessible par le lien). |
+| `annoter-edits.html` |
+ Dit, pour chaque edit, jusqu'à quel épisode il montre l'histoire. Le fil d'edits ne montre ensuite que ceux qui ne spoilent rien de ce que tu n'as pas vu (bouton « Spoilers » en haut à droite pour tout voir). À ouvrir dans Chrome sur l'ordinateur des vidéos. |
 | `Convertir-Video.bat` | Convertit n'importe quelle vidéo en MP4 lisible par le navigateur (ou en MKV pour archiver). Glisser-déposer des fichiers ou des dossiers dessus. |
 | `download-all-seasons.bat` | Télécharge toutes les saisons d'un anime depuis une URL du catalogue Anime-Sama, une fenêtre par saison. |
 | `main.py` | Le téléchargeur en ligne de commande (`python main.py --help`). |

@@ -307,9 +307,11 @@ function poserNote(btn){
   const c = noteCible(box.dataset.rate);
   const n = normNote(btn.dataset.rateN);
   const val = (n === c.perso) ? 0 : n;         // recliquer sa propre etoile la retire
+  toast(val ? 'Ta note : ' + fmtNote(val) + '/10' : 'Note retirée', 'ok');
   if (S.shared){ envoyerNote(box.dataset.rate, val); return; }
   if (c.ep) setEpNote(c.id, val); else setNote(c.id, val);
   majNotes();
+
 
 }
 
@@ -325,7 +327,8 @@ function resumeTileHTML(c){
   const pct = Math.max(0, Math.min(100, (c.pct || 0) * 100));
   const tgt = resumeTarget(c);
   const broom = '<button class="forget" data-forget="' + esc(resumeId(c)) + '" ' +
-    'title="Oublier cette reprise" aria-label="Oublier cette reprise">' + ICON_BROOM + '</button>';
+    'title="Retirer de « Reprendre »" aria-label="Retirer de « Reprendre »">' +
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>';
 
   let face, name, meta;
   if (c.kind === 'ep'){
@@ -372,7 +375,7 @@ function tileHTML(e){
   const pct = p && p.d ? Math.min(100, p.t / p.d * 100) : 0;
   const season = a && a.seasonList.length > 1 ? seasonLabel(e.seasonKey) + ' · ' : '';
   return '<div class="tile" tabindex="0" data-play="' + esc(e.rel) + '">' +
-    '<div class="th" data-thumb="' + esc(e.rel) + '">' +
+    '<div class="th' + classeSpoil(e) + '" data-thumb="' + esc(e.rel) + '">' +
       '<div class="ph">' + (e.ep != null ? esc(e.ep) : '▶') + '</div>' +
       '<div class="veil"></div><div class="play"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="m6 4 14 8-14 8z"/></svg></div>' +
       '<div class="tags">' +
@@ -384,7 +387,8 @@ function tileHTML(e){
     '</div>' +
     '<div class="tbody">' +
       '<div class="tname">' + esc(a ? a.title : e.anime) + '</div>' +
-      '<div class="tmeta">' + esc(season) + (e.ep != null ? 'Ép. ' + e.ep : esc(e.title)) +
+      '<div class="tmeta">' + esc(season) + (e.ep != null ? 'Ép. ' + e.ep : esc(titreEpisode(e))) +
+
         '<span class="sep"></span>' + fmtSize(e.size) + '</div>' +
     '</div></div>';
 }
@@ -705,15 +709,18 @@ function epHTML(e){
   const left = p && p.d && !p.done && p.t > 20 ? ' · ' + fmtTime(p.d - p.t) + ' restantes' : '';
   return '<div class="ep" tabindex="0" data-play="' + esc(e.rel) + '">' +
     '<div class="num">' + (e.ep != null ? esc(e.ep) : '•') + '</div>' +
-    '<div class="epth" data-thumb="' + esc(e.rel) + '">' +
+    '<div class="epth' + classeSpoil(e) + '" data-thumb="' + esc(e.rel) + '">' +
       (pct > 0 ? '<div class="bar" style="z-index:2"><i style="width:' + pct.toFixed(1) + '%"></i></div>' : '') +
     '</div>' +
-    '<div class="epinfo"><b>' + esc(e.title) + '</b>' +
+    '<div class="epinfo"><b>' + esc(titreEpisode(e)) + '</b>' +
       '<div class="sub">' + fmtSize(e.size) + '<span class="sep"></span><span class="mono">.' + esc(e.ext) + '</span>' +
       (e.play === 'ts' ? '<span class="chip ts">MPEG-TS</span>' : '') +
       (p && p.done ? '<span class="chip">Vu</span>' : '') + esc(left) + '</div>' +
     '</div>' +
     rateHTML('e:' + e.rel) +
+    '<button class="epvu' + (p && p.done ? ' on' : '') + '" data-vu="' + esc(e.rel) + '" ' +
+      'aria-label="' + (p && p.done ? 'Marquer comme non vu' : 'Marquer comme vu') + '" title="' + (p && p.done ? 'Vu — toucher pour marquer non vu' : 'Marquer comme vu') + '">' +
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>' +
     '<div class="go"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m6 4 14 8-14 8z"/></svg></div>' +
     '</div>';
 }
@@ -869,8 +876,19 @@ function renderList(kind){
 
 /* ------------------------------------------------------ interactions */
 document.addEventListener('click', (ev) => {
-  const t = ev.target.closest('[data-rate-n],[data-forget],[data-fav],[data-play],[data-anime],[data-go],[data-rail],[data-doc],[data-docs],[data-scan],[data-edits],[data-edits-tous]');
+  const t = ev.target.closest('[data-vu],[data-rate-n],[data-forget],[data-fav],[data-play],[data-anime],[data-go],[data-rail],[data-doc],[data-docs],[data-scan],[data-edits],[data-edits-tous]');
   if (!t) return;
+  // la coche d'un episode: vu / pas vu, sans lancer la lecture
+  if (t.dataset.vu){
+    ev.preventDefault(); ev.stopPropagation();
+    const e = findEp(t.dataset.vu);
+    if (!e) return;
+    const vu = !(getProgress(e) || {}).done;
+    const avant = marquerVu([e], vu);
+    rafraichirVue();
+    toastAction(vu ? 'Marqué comme vu' : 'Marqué comme non vu', 'Annuler', () => retablirVu(avant));
+    return;
+  }
   // les etoiles vivent dans une ligne d'episode, elle-meme cliquable: la note
   // se pose sans lancer la lecture
   if (t.dataset.rateN !== undefined){
@@ -998,8 +1016,10 @@ $('#btnFolder').addEventListener('click', pickFolder);
 $('#btnPick').addEventListener('click', pickFolder);
 addEventListener('scroll', () => $('#topbar').classList.toggle('solid', scrollY > 40), { passive:true });
 addEventListener('keydown', (ev) => {
-  if (ev.target.matches('input,textarea')) return;
+  // Ctrl+R recharge la page: ce n'est pas un « R » de rescan
+  if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.target.matches('input,textarea,select')) return;
   if ($('#player').hidden && $('#reader').hidden && $('#edits').hidden){
+
     if (ev.key === '/' ){ ev.preventDefault(); $('#q').focus(); }
     if (ev.key === 'r' || ev.key === 'R'){ if (S.mode === 'fs' || S.mode === 'http') refresh(); }
   }

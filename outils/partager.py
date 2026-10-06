@@ -10,8 +10,10 @@ Trois etapes:
 
 Le lien vit le temps que cette fenetre reste ouverte. Ctrl+C pour tout fermer.
 """
+import gzip
 import hashlib
 import hmac
+import io
 import http.cookies
 import http.server
 import json
@@ -211,16 +213,34 @@ def lire_notes_invites(dossier):
     return propre or None
 
 
+def hache_invite(iid):
+    """L'identifiant de vote d'un invite, tel qu'il est publie. L'index est lu
+    par tout le monde: y mettre les vrais identifiants permettait de voter a la
+    place d'un ami, ou de lui prendre ses votes. Le vrai ne quitte jamais son
+    navigateur et ce serveur; la page apprend son empreinte par /__moi."""
+    return hashlib.sha256(("netflox-invite:" + str(iid)).encode("utf-8")).hexdigest()[:16]
+
+
+def _votes_publies(votes):
+    return {hache_invite(k): v for k, v in votes.items()}
+
+
 def fiche_serie(dossier):
-    """Ce que la page recoit d'une serie: la fiche de l'hote et les notes des invites."""
+    """Ce que la page recoit d'une serie: la fiche de l'hote et les notes des
+    invites, sous leurs identifiants publies."""
     fiche = None
     chemin = os.path.join(dossier, ACCOMPAGNEMENT)
     if os.path.isfile(chemin):
         fiche = lire_accompagnement(chemin)
     invites = lire_notes_invites(dossier)
     if invites:
+        publie = {}
+        if invites.get("serie"):
+            publie["serie"] = _votes_publies(invites["serie"])
+        if invites.get("episodes"):
+            publie["episodes"] = {rel: _votes_publies(v) for rel, v in invites["episodes"].items()}
         fiche = dict(fiche or {})
-        fiche["notes_invites"] = invites
+        fiche["notes_invites"] = publie
     return fiche
 
 
@@ -300,6 +320,7 @@ def construire_index():
 # ----------------------------------------------------------- les notes -----
 _verrou_notes = threading.Lock()
 _ADRESSES_HOTE = None
+_ADRESSES_DATE = 0
 
 
 def est_hote(handler):
@@ -318,8 +339,10 @@ def est_machine_hote(handler):
     sur la box arrive de sa propre adresse: il note en invite."""
     if handler.headers.get("Cf-Connecting-Ip") or handler.headers.get("Cf-Ray"):
         return False
-    global _ADRESSES_HOTE
-    if _ADRESSES_HOTE is None:
+    global _ADRESSES_HOTE, _ADRESSES_DATE
+    # relevees toutes les 5 minutes: l'adresse sur la box peut changer (DHCP, VPN)
+    if _ADRESSES_HOTE is None or time.time() - _ADRESSES_DATE > 300:
+        _ADRESSES_DATE = time.time()
         a = {"127.0.0.1", "::1", adresse_locale()}
         try:
             a.update(socket.gethostbyname_ex(socket.gethostname())[2])
@@ -340,6 +363,10 @@ def _base_media():
     return None
 
 
+class FichierAbime(Exception):
+    """Un fichier qui existe mais ne se lit pas: on n'y ecrit pas par-dessus."""
+
+
 def _lire_ou(chemin, defaut):
     try:
         with open(chemin, encoding="utf-8") as f:
@@ -349,10 +376,30 @@ def _lire_ou(chemin, defaut):
         return defaut
 
 
+def _lire_pour_ecrire(chemin, defaut):
+    """Comme _lire_ou, mais un fichier present et illisible (abime, a moitie
+    ecrit) leve FichierAbime au lieu de rendre le defaut: le rendre, c'etait le
+    remplacer par une fiche presque vide a la prochaine note."""
+    if not os.path.exists(chemin):
+        return defaut
+    try:
+        with open(chemin, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        raise FichierAbime(chemin)
+    if not isinstance(d, dict):
+        raise FichierAbime(chemin)
+    return d
+
+
 def _ecrire(chemin, data):
-    tmp = chemin + ".tmp"
+    """Ecriture atomique et durable: un fichier temporaire propre a ce fil,
+    pousse sur le disque, puis mis en place d'un coup."""
+    tmp = "%s.%d.tmp" % (chemin, threading.get_ident())
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, chemin)
 
 
@@ -387,7 +434,10 @@ def noter(d, hote):
     with _verrou_notes:
         if hote:
             fichier = os.path.join(dossier, ACCOMPAGNEMENT)
-            data = _lire_ou(fichier, {"version": 1, "serie": morceaux[0]})
+            try:
+                data = _lire_pour_ecrire(fichier, {"version": 1, "serie": morceaux[0]})
+            except FichierAbime:
+                return False, "fiche de la serie illisible: rien n'est ecrit"
             if court is None:
                 if n: data["note"] = n
                 else: data.pop("note", None)
@@ -399,7 +449,10 @@ def noter(d, hote):
                 else: data.pop("notes_episodes", None)
         else:
             fichier = os.path.join(dossier, NOTES_INVITES)
-            data = _lire_ou(fichier, {"version": 1})
+            try:
+                data = _lire_pour_ecrire(fichier, {"version": 1})
+            except FichierAbime:
+                return False, "notes des invites illisibles: rien n'est ecrit"
             if court is None:
                 votes = data.get("serie") if isinstance(data.get("serie"), dict) else {}
                 if n: votes[invite] = n
@@ -466,7 +519,24 @@ def _ouvrir_session(compte):
 
 
 def _qui(handler):
-    return handler.headers.get("Cf-Connecting-Ip") or handler.client_address[0]
+    """L'adresse de celui qui demande. L'en-tete du tunnel n'est cru que s'il
+    arrive de cette machine (c'est la que tourne cloudflared): sur la box, un
+    invite pouvait l'inventer et changer d'adresse a chaque essai."""
+    ip = handler.client_address[0]
+    if ip in ("127.0.0.1", "::1") and handler.headers.get("Cf-Connecting-Ip"):
+        return handler.headers.get("Cf-Connecting-Ip")
+    return ip
+
+
+_inscriptions = {}                              # adresse -> heures des comptes crees
+INSCRIPTIONS_MAX, INSCRIPTIONS_FENETRE = 5, 3600
+
+
+def _trop_d_inscriptions(handler):
+    maintenant = time.time()
+    l = [t for t in _inscriptions.get(_qui(handler), []) if maintenant - t < INSCRIPTIONS_FENETRE]
+    _inscriptions[_qui(handler)] = l
+    return len(l) >= INSCRIPTIONS_MAX
 
 
 def _trop_d_echecs(handler):
@@ -476,7 +546,9 @@ def _trop_d_echecs(handler):
     return len(l) >= ECHECS_MAX
 
 
-def compte_inscrire(pseudo, mdp, donnees):
+def compte_inscrire(pseudo, mdp, donnees, handler=None):
+    if handler is not None and _trop_d_inscriptions(handler):
+        return None, "Trop de comptes créés d'ici : réessaie plus tard"
     if not isinstance(pseudo, str) or not PSEUDO.match(pseudo.strip()):
         return None, "Pseudo : 3 à 24 lettres, chiffres, espaces, . _ -"
     if not isinstance(mdp, str) or not 4 <= len(mdp) <= 200:
@@ -494,6 +566,8 @@ def compte_inscrire(pseudo, mdp, donnees):
                   "donnees": donnees if isinstance(donnees, dict) else {}, "sessions": {}}
         jeton = _ouvrir_session(compte)
         _ecrire(fichier, compte)
+    if handler is not None:
+        _inscriptions.setdefault(_qui(handler), []).append(time.time())
     return (compte, fid + "." + jeton), ""
 
 
@@ -511,7 +585,33 @@ def compte_connecter(handler, pseudo, mdp):
             return None, "Pseudo ou mot de passe incorrect"
         jeton = _ouvrir_session(compte)
         _ecrire(fichier, compte)
+    _echecs.pop(_qui(handler), None)            # la bonne reponse efface les essais rates
     return (compte, fid + "." + jeton), ""
+
+
+def fusionner_donnees(serveur, recu):
+    """Ce que garde un compte quand plusieurs appareils l'envoient: avant,
+    le dernier arrive ecrasait tout, et un telephone reste ouvert effacait
+    ce qu'on venait de regarder sur l'ordinateur. Les positions datees: la
+    plus recente. Les edits vus et leurs mesures: les deux, l'envoi recent
+    l'emportant sur un meme edit. Les reglages: ceux de l'envoi."""
+    out = dict(serveur) if isinstance(serveur, dict) else {}
+    for k, v in recu.items():
+        ici = out.get(k)
+        if ici is None or v is None:
+            if v is not None:
+                out[k] = v
+            continue
+        if re.match(r"(pg|rd|sc)\.", k) and isinstance(v, dict) and isinstance(ici, dict):
+            if (v.get("at") or 0) >= (ici.get("at") or 0):
+                out[k] = v
+        elif k.startswith("oubli.") and isinstance(v, (int, float)) and isinstance(ici, (int, float)):
+            out[k] = max(v, ici)
+        elif k in ("edvus", "edstats") and isinstance(v, dict) and isinstance(ici, dict):
+            out[k] = dict(ici, **v)
+        else:
+            out[k] = v
+    return out
 
 
 def _session(handler):
@@ -540,6 +640,13 @@ INVITE = re.compile(r"[A-Za-z0-9_-]{8,64}$")
 
 
 def _deplacer_votes(ancien, vers_hote=False, nouveau=None):
+    try:
+        return _deplacer_votes_(ancien, vers_hote, nouveau)
+    except (OSError, ValueError, TypeError, AttributeError, FichierAbime):
+        return 0
+
+
+def _deplacer_votes_(ancien, vers_hote=False, nouveau=None):
     """Les votes d'invite d'un identifiant, dans toute la bibliotheque: rendus
     a un autre identifiant (le compte qui vient de se connecter), ou portes dans
     la fiche de l'hote. Une case deja prise chez le destinataire garde sa note:
@@ -554,8 +661,13 @@ def _deplacer_votes(ancien, vers_hote=False, nouveau=None):
             f_inv = os.path.join(dossier, NOTES_INVITES)
             if not os.path.isfile(f_inv):
                 continue
-            inv = _lire_ou(f_inv, {})
-            fiche = _lire_ou(os.path.join(dossier, ACCOMPAGNEMENT), {"version": 1, "serie": serie}) if vers_hote else None
+            try:
+                inv = _lire_pour_ecrire(f_inv, {})
+                fiche = _lire_pour_ecrire(os.path.join(dossier, ACCOMPAGNEMENT), {"version": 1, "serie": serie}) if vers_hote else None
+            except FichierAbime:
+                continue                          # un fichier abime: on n'y touche pas
+            if not isinstance(inv.get("episodes", {}), dict):
+                continue
             cibles = [("serie", None, inv.get("serie"))] + \
                      [("ep", rel, v) for rel, v in (inv.get("episodes") or {}).items()]
             change = fiche_change = False
@@ -591,7 +703,145 @@ def _deplacer_votes(ancien, vers_hote=False, nouveau=None):
     return touches
 
 
+# ------------------------------------------------- gestion des comptes -----
+"""La page comptes.html, servie a la seule machine de l'hote: qui a un compte,
+ce qu'il a regarde et note, et de quoi l'aider — nouveau mot de passe,
+deconnecter ses appareils, renommer, supprimer. Rien n'est jamais efface pour
+de bon: un compte supprime part dans comptes/supprimes/."""
+FID = re.compile(r"[0-9a-f]{32}$")
+
+
+def _episodes_par_serie():
+    """Le nombre d'episodes de chaque serie, d'apres l'index (edits exclus)."""
+    data = _lire_ou(os.path.join(RACINE, MANIFESTE), {})
+    out = {}
+    for f in data.get("files") or []:
+        rel = f[0] if isinstance(f, list) and f else ""
+        parts = rel.split("/")
+        ext = rel.rsplit(".", 1)[-1].lower() if "." in rel else ""
+        if len(parts) < 2 or ext not in VIDEO_EXT or any(p.lower() in ("edits", "edit", "amv", "amvs") for p in parts[1:-1]):
+            continue
+        out[parts[0]] = out.get(parts[0], 0) + 1
+    return out
+
+
+def _votes_de(iid):
+    """Les notes posees par un identifiant d'invite, serie par serie."""
+    base = _base_media()
+    out = []
+    if not base or not iid:
+        return out
+    for serie in sorted(os.listdir(base)):
+        inv = lire_notes_invites(os.path.join(base, serie)) or {}
+        if iid in (inv.get("serie") or {}):
+            out.append({"serie": serie, "episode": None, "note": inv["serie"][iid]})
+        for rel, votes in (inv.get("episodes") or {}).items():
+            if iid in votes:
+                out.append({"serie": serie, "episode": rel, "note": votes[iid]})
+    return out
+
+
+def _resume_compte(fid, c):
+    d = c.get("donnees") or {}
+    vus = en_cours = 0
+    dernier = c.get("maj") or 0
+    series = set()
+    for k, v in d.items():
+        if k.startswith("pg.") and isinstance(v, dict):
+            series.add(k[3:].split("/", 1)[0])
+            if v.get("done"): vus += 1
+            elif (v.get("t") or 0) > 20: en_cours += 1
+            dernier = max(dernier, int((v.get("at") or 0) / 1000))
+    return {"id": fid, "pseudo": c.get("pseudo"), "cree": c.get("cree"), "actif": dernier,
+            "hote": bool(c.get("hote")), "appareils": len(c.get("sessions") or {}),
+            "vus": vus, "enCours": en_cours, "series": len(series)}
+
+
+def admin(action, d):
+    dossier = _dossier_comptes()
+    if action == "liste":
+        out = []
+        if os.path.isdir(dossier):
+            for nom in os.listdir(dossier):
+                if nom.endswith(".json") and FID.match(nom[:-5]):
+                    c = _lire_ou(os.path.join(dossier, nom), None)
+                    if c:
+                        out.append(_resume_compte(nom[:-5], c))
+        out.sort(key=lambda x: -(x["actif"] or 0))
+        return {"ok": True, "comptes": out}
+
+    fid = d.get("id")
+    if not isinstance(fid, str) or not FID.match(fid):
+        return {"ok": False, "erreur": "compte inconnu"}
+    fichier = os.path.join(dossier, fid + ".json")
+    with _verrou_comptes:
+        c = _lire_ou(fichier, None)
+        if not c:
+            return {"ok": False, "erreur": "compte inconnu"}
+
+        if action == "detail":
+            totaux = _episodes_par_serie()
+            par = {}
+            for k, v in (c.get("donnees") or {}).items():
+                if not (k.startswith("pg.") and isinstance(v, dict)):
+                    continue
+                rel = k[3:]
+                serie = rel.split("/", 1)[0]
+                s = par.setdefault(serie, {"serie": serie, "total": totaux.get(serie, 0), "vus": 0, "episodes": []})
+                pct = round(100 * (v.get("t") or 0) / v["d"]) if v.get("d") else 0
+                s["episodes"].append({"rel": rel.split("/", 1)[1] if "/" in rel else rel,
+                                      "vu": bool(v.get("done")), "pct": min(100, pct), "at": v.get("at")})
+                if v.get("done"):
+                    s["vus"] += 1
+            for s in par.values():
+                s["episodes"].sort(key=lambda e: [int(x) if x.isdigit() else x for x in re.split(r"(\d+)", e["rel"])])
+            iid = (c.get("donnees") or {}).get("inviteId")
+            return {"ok": True, "compte": _resume_compte(fid, c),
+                    "series": sorted(par.values(), key=lambda s: -max([e["at"] or 0 for e in s["episodes"]] or [0])),
+                    "notes": _votes_de(iid) if isinstance(iid, str) else []}
+
+        if action == "mdp":
+            mdp = d.get("mdp")
+            if not isinstance(mdp, str) or not 4 <= len(mdp) <= 200:
+                return {"ok": False, "erreur": "Mot de passe : 4 caractères au moins"}
+            c["sel"] = secrets.token_hex(16)
+            c["hash"] = _hacher(mdp, c["sel"])
+            c["sessions"] = {}                     # un nouveau mot de passe deconnecte partout
+            _ecrire(fichier, c)
+            return {"ok": True}
+        if action == "deconnecter":
+            c["sessions"] = {}
+            _ecrire(fichier, c)
+            return {"ok": True}
+        if action == "hote":
+            if d.get("actif"): c["hote"] = True
+            else: c.pop("hote", None)
+            _ecrire(fichier, c)
+            return {"ok": True}
+        if action == "renommer":
+            pseudo = d.get("pseudo")
+            if not isinstance(pseudo, str) or not PSEUDO.match(pseudo.strip()):
+                return {"ok": False, "erreur": "Pseudo : 3 à 24 lettres, chiffres, espaces, . _ -"}
+            nouveau = _id_compte(pseudo)
+            cible = os.path.join(dossier, nouveau + ".json")
+            if nouveau != fid and os.path.exists(cible):
+                return {"ok": False, "erreur": "Ce pseudo est déjà pris"}
+            c["pseudo"] = pseudo.strip()
+            c["sessions"] = {}                     # le cookie porte l'ancien nom de fichier
+            _ecrire(cible, c)
+            if nouveau != fid:
+                os.remove(fichier)
+            return {"ok": True, "id": nouveau}
+        if action == "supprimer":
+            corbeille = os.path.join(dossier, "supprimes")
+            os.makedirs(corbeille, exist_ok=True)
+            os.replace(fichier, os.path.join(corbeille, "%s-%d.json" % (fid, int(time.time()))))
+            return {"ok": True}
+    return {"ok": False, "erreur": "action inconnue"}
+
+
 def _cookie(handler, valeur, age):
+
     """HttpOnly: la page ne le voit pas. Secure des qu'on arrive en https
     (le tunnel): un cookie de session ne voyage pas en clair."""
     https = "https" in (handler.headers.get("Cf-Visitor") or "") or \
@@ -600,8 +850,25 @@ def _cookie(handler, valeur, age):
         COOKIE, valeur, age, "; Secure" if https else "")
 
 
+_index_gz = {"cle": None, "corps": None}
+def _index_compresse():
+    """L'index compresse, garde tant que le fichier n'a pas bouge."""
+    chemin = os.path.join(RACINE, MANIFESTE)
+    try:
+        st = os.stat(chemin)
+    except OSError:
+        return None
+    cle = (st.st_mtime_ns, st.st_size)
+    if _index_gz["cle"] != cle:
+        with open(chemin, "rb") as f:
+            _index_gz["corps"] = gzip.compress(f.read(), compresslevel=6)
+        _index_gz["cle"] = cle
+    return _index_gz["corps"]
+
+
 # -------------------------------------------------------------- serveur ----
 class Handler(http.server.SimpleHTTPRequestHandler):
+
     """Ajoute les requetes partielles: sans elles, impossible de se deplacer
     dans une video, et chaque episode devrait etre telecharge en entier."""
 
@@ -626,16 +893,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def autorise(self):
         """Un lien public ne donne acces qu'a la page et aux media: le code
-        source et les fichiers de travail restent a la maison."""
+        source et les fichiers de travail restent a la maison. Sous videos/,
+        seulement ce qu'on regarde ou lit — videos, images, documents,
+        sous-titres, pistes audio. Les bibliotheque.json bruts (progression et
+        favoris de l'hote), notes-invites.json et les fichiers de travail ne
+        partent plus: la page recoit deja ce qu'elle doit en savoir par l'index."""
         chemin = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         if chemin in ("", "/"):
             return True
         rel = chemin.lstrip("/")
-        if rel in ("index.html", MANIFESTE, "favicon.ico"):
+        if rel in ("index.html", MANIFESTE, "favicon.ico", "manifest.webmanifest", "sw.js"):
             return True
+        if rel == "comptes.html":                   # la gestion des comptes: l'hote seul
+            return est_machine_hote(self)
         premier = rel.split("/", 1)[0].lower()
         # js/ porte le code de la page: sans lui l'invite recoit une coquille vide
-        return premier in DOSSIERS_MEDIA or premier in ("assets", "js")
+        if premier in ("assets", "js", "icones"):
+            return True
+        if premier in DOSSIERS_MEDIA:
+            ext = rel.rsplit(".", 1)[-1].lower() if "." in rel.rsplit("/", 1)[-1] else ""
+            return ext in MEDIA_EXT or ext in SUB_EXT or ext in AUD_EXT
+        return False
+
+    def list_directory(self, path):
+        # jamais de liste de dossier: elle enumerait tout ce qui traine
+        self.send_error(404)
+        return None
 
     def _chemin(self):
         return urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
@@ -655,7 +938,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # et, s'il est connecte, son compte avec ce qu'il y a range
         if self._chemin() == "/__moi":
             compte = _session(self)[0]
+            # l'empreinte publiee de son identifiant de vote: pour retrouver ses notes dans l'index
+            iid = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("i", [""])[0]
             return self._json({"hote": est_hote(self), "machine": est_machine_hote(self), "comptes": True,
+                               "monVote": hache_invite(iid) if INVITE.match(iid or "") else None,
                                "compte": {"pseudo": compte["pseudo"], "donnees": compte.get("donnees") or {},
                                           "hote": bool(compte.get("hote"))}
                                          if compte else None})
@@ -663,9 +949,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         chemin = self._chemin()
-        if chemin != "/__noter" and not chemin.startswith("/__compte/"):
+        if chemin != "/__noter" and not chemin.startswith("/__compte/") and not chemin.startswith("/__admin/"):
+            self.close_connection = True          # le corps n'est pas lu: la connexion ne sert plus
             self.send_error(404)
             return
+        # une page d'un autre site ne poste rien ici, meme depuis le navigateur de l'hote
+        origine = self.headers.get("Origin")
+        if origine and urllib.parse.urlsplit(origine).netloc != (self.headers.get("Host") or ""):
+            self.close_connection = True
+            return self._json({"ok": False, "erreur": "origine refusee"}, 403)
         limite = 4 * 1024 * 1024 if chemin in ("/__compte/sauver", "/__compte/inscription") else 4096
         try:
             n = int(self.headers.get("Content-Length") or 0)
@@ -675,9 +967,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if not isinstance(d, dict):
                 raise ValueError
         except (ValueError, UnicodeDecodeError):
+            self.close_connection = True
             return self._json({"ok": False, "erreur": "requete illisible"}, 400)
         if chemin.startswith("/__compte/"):
-            return self._compte(chemin[len("/__compte/"):], d)
+            try:
+                return self._compte(chemin[len("/__compte/"):], d)
+            except Exception:
+                return self._json({"ok": False, "erreur": "erreur du partage"}, 500)
+        if chemin.startswith("/__admin/"):
+            if not est_machine_hote(self):
+                return self._json({"ok": False, "erreur": "depuis la machine de l'hote seulement"}, 403)
+            try:
+                return self._json(admin(chemin[len("/__admin/"):], d))
+            except Exception as e:
+                return self._json({"ok": False, "erreur": "erreur: %s" % e}, 500)
         hote = est_hote(self)
         try:
             ok, raison = noter(d, hote)
@@ -689,7 +992,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         try:
             if action in ("inscription", "connexion"):
                 if action == "inscription":
-                    res, erreur = compte_inscrire(d.get("pseudo"), d.get("mdp"), d.get("donnees"))
+                    res, erreur = compte_inscrire(d.get("pseudo"), d.get("mdp"), d.get("donnees"), self)
                 else:
                     res, erreur = compte_connecter(self, d.get("pseudo"), d.get("mdp"))
                 if not res:
@@ -732,7 +1035,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 n = _deplacer_votes(ancien, vers_hote=bool(compte.get("hote")), nouveau=iid)
                 return self._json({"ok": True, "deplaces": n})
             if action == "sauver":
-
                 if not compte:
                     return self._json({"ok": False, "erreur": "non connecte"}, 401)
                 if not isinstance(d.get("donnees"), dict):
@@ -741,7 +1043,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     frais = _lire_ou(fichier, None)
                     if not frais:
                         return self._json({"ok": False, "erreur": "non connecte"}, 401)
-                    frais["donnees"] = d["donnees"]
+                    frais["donnees"] = fusionner_donnees(frais.get("donnees"), d["donnees"])
                     frais["maj"] = int(time.time())
                     _ecrire(fichier, frais)
                 return self._json({"ok": True})
@@ -757,6 +1059,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return None
         if urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).lstrip("/") == MANIFESTE:
             rafraichir_fiches()
+            # l'index pese plusieurs Mo de texte: compresse, il en fait dix fois moins
+            if "gzip" in (self.headers.get("Accept-Encoding") or "") and not self.headers.get("Range"):
+                corps = _index_compresse()
+                if corps is not None:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Encoding", "gzip")
+                    self.send_header("Content-Length", str(len(corps)))
+                    self.send_header("Vary", "Accept-Encoding")
+                    self.end_headers()
+                    return io.BytesIO(corps)
+
 
         plage = self.headers.get("Range")
         if not plage:
@@ -1094,21 +1408,38 @@ def partage_internet():
     proc = ouvrir_tunnel(exe, port, sur_lien)
     if not pret.wait(45):
         print(couleur("pas de reponse", "91"))
-        print("  Verifie ta connexion, puis relance.")
-    attendre(serveur, proc)
+        print("  Verifie ta connexion: le tunnel sera retente tout seul.")
+    attendre(serveur, proc, lambda: ouvrir_tunnel(exe, port, sur_lien))
     return 0
 
 
-def attendre(serveur, proc):
+def attendre(serveur, proc, relancer=None):
+    """Jusqu'a Ctrl+C. Si le tunnel tombe (coupure, mise en veille), on le
+    rouvre: le serveur, lui, n'a pas bouge, et le nouveau lien s'affiche et
+    se copie comme le premier. On abandonne apres 5 echecs d'affilee."""
     print(couleur("  Ctrl+C pour arreter le partage.", "90"))
+    essais, stable_depuis = 0, time.time()
     try:
         while True:
             if proc is not None and proc.poll() is not None:
-                print(couleur("\n  Le tunnel s'est ferme.", "91"))
-                break
+                if relancer is None or essais >= 5:
+                    print(couleur("\n  Le tunnel s'est ferme.", "91"))
+                    break
+                if time.time() - stable_depuis > 600:
+                    essais = 0                       # il avait tenu: on repart de zero
+                essais += 1
+                attente = min(60, 5 * 2 ** (essais - 1))
+                print(couleur("\n  Le tunnel s'est ferme : nouvel essai dans %d s (%d/5)..." % (attente, essais), "93"))
+                time.sleep(attente)
+                print("  Reouverture du tunnel...", end=" ", flush=True)
+                proc = relancer()
+                stable_depuis = time.time()
+                print(couleur("  (le lien change: renvoie le nouveau a tes potes)", "90"))
+                continue
             time.sleep(0.5)
     except KeyboardInterrupt:
         print()
+
     print("  Fermeture...")
     if proc is not None:
         try:

@@ -22,7 +22,9 @@ function artTag(a){
   if (!a || !a.art) return '';
   const url = artUrls.get(a.art.rel);
   const ready = url && artReady.has(a.art.rel);
-  return '<img data-art="' + esc(a.key) + '" alt=""' +
+  // paresseuses: 134 affiches d'un coup pesaient 34 Mo au premier affichage sur telephone
+  return '<img data-art="' + esc(a.key) + '" alt="" loading="lazy" decoding="async"' +
+
     (ready ? ' src="' + esc(url) + '" class="in" data-done="1"' : '') + '>';
 }
 function paintArt(img, rel, url){

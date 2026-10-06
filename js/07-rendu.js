@@ -81,6 +81,8 @@ function nextUnwatched(a){
 }
 
 function render(){
+  dernierVuCache.clear();                     // la progression a pu bouger depuis le dernier rendu
+
   ['home','anime','list','docs'].forEach(v => { const el = $('#view-' + v); if (el) el.hidden = true; });
   if (S.query)                 renderList('search');
   else if (S.view === 'home')  renderHome();

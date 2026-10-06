@@ -192,7 +192,8 @@ $('#rOpen').addEventListener('click', () => {
   if (readerSrc) window.open(readerSrc.url, '_blank');
 });
 addEventListener('keydown', (ev) => {
-  if (R.hidden || ev.target.matches('input,textarea')) return;
+  if (R.hidden || ev.ctrlKey || ev.metaKey || ev.altKey || ev.target.matches('input,textarea,select')) return;
+
   if (ev.key === 'Escape'){ closeReader(); return; }
   const body = $('#rBody');
   if (ev.key === 'PageDown' || ev.key === ' '){ ev.preventDefault(); body.scrollBy({ top: body.clientHeight * 0.9, behavior:'smooth' }); }

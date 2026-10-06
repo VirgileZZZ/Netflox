@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comptes · Netflox</title>
+<link rel="icon" href="icones/netflox.svg">
+<!--
+  La gestion des comptes des invites, pour l'hote seul: le serveur de partage
+  ne sert cette page qu'a sa propre machine (jamais par le lien), et refuse les
+  actions /__admin/ venues d'ailleurs. Ouvrir: http://127.0.0.1:<port>/comptes.html
+  pendant que partager.bat tourne.
+-->
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  color-scheme:dark;
+  --bg:#08080c; --bg2:#0d0d13; --card:#15151e; --card2:#1e1e2b; --card3:#282838;
+  --line:#25252f; --line2:#33334a; --text:#f3f3f8; --muted:#9b9bb2; --dim:#67677f;
+  --accent:#7c5cff; --accent2:#ff4d8d; --ok:#28e0a0; --bad:#ff5c5c;
+  --grad:linear-gradient(120deg,var(--accent),var(--accent2));
+}
+body{background:var(--bg);color:var(--text);font-family:"Inter","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh}
+button,input{font:inherit;color:inherit;background:none;border:0}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+[hidden]{display:none !important}
+.top{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--bg2);position:sticky;top:0;z-index:5}
+.mark{width:28px;height:28px;border-radius:8px;background:var(--grad);display:grid;place-items:center}
+.top h1{font-size:1.05rem;font-weight:800;letter-spacing:-.03em}
+.top h1 b{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.top .gap{flex:1}
+.lien{font-size:.82rem;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;border:1px solid var(--line2)}
+.lien:hover{color:var(--text)}
+main{max-width:1100px;margin:0 auto;padding:22px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:20px}
+h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);margin-bottom:10px}
+.liste{display:grid;gap:8px}
+.compte{display:grid;grid-template-columns:42px 1fr auto;gap:12px;align-items:center;padding:12px;border-radius:12px;background:var(--card);
+  border:1px solid transparent;text-align:left;width:100%}
+.compte:hover{background:var(--card2)}
+.compte.on{border-color:var(--accent2);background:var(--card2)}
+.av{width:42px;height:42px;border-radius:50%;background:var(--grad);display:grid;place-items:center;font-weight:800;font-size:1.05rem}
+.compte b{display:block;font-size:.95rem}
+.compte small{color:var(--muted);font-size:.78rem}
+.badge{font-size:.68rem;font-weight:800;padding:2px 7px;border-radius:999px;background:rgba(124,92,255,.2);color:#c4b5ff;margin-left:6px;vertical-align:middle}
+.chiffres{text-align:right;font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.chiffres b{color:var(--text);font-size:.95rem;display:inline}
+.vide{color:var(--muted);font-size:.9rem;padding:20px;border:1px dashed var(--line2);border-radius:12px;text-align:center}
+.detail{background:var(--card);border-radius:14px;padding:18px;display:grid;gap:16px;align-content:start}
+.detail h3{font-size:1.25rem;letter-spacing:-.02em}
+.detail .meta{color:var(--muted);font-size:.82rem}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.btn{padding:8px 13px;border-radius:9px;border:1px solid var(--line2);font-size:.85rem;font-weight:600;color:var(--text)}
+.btn:hover{border-color:var(--muted)}
+.btn.danger{color:var(--bad);border-color:rgba(255,92,92,.4)}
+.btn.danger:hover{background:rgba(255,92,92,.1)}
+.formule{display:flex;gap:8px;flex-wrap:wrap}
+.formule input{flex:1;min-width:160px;padding:9px 12px;border-radius:9px;border:1px solid var(--line2);background:var(--bg2)}
+.formule .btn{background:var(--grad);border:0;color:#fff}
+.case{display:flex;gap:9px;align-items:center;font-size:.86rem;cursor:pointer}
+.case input{accent-color:var(--accent2);width:16px;height:16px}
+.serie{display:grid;gap:6px;padding:10px 12px;border-radius:10px;background:var(--bg2)}
+.serie .t{display:flex;justify-content:space-between;gap:10px;font-size:.88rem}
+.serie .t span{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.jauge{height:5px;border-radius:3px;background:var(--line2);overflow:hidden}
+.jauge i{display:block;height:100%;background:var(--ok)}
+.eps{display:flex;flex-wrap:wrap;gap:4px}
+.eps span{font-size:.7rem;padding:1px 6px;border-radius:6px;background:var(--card2);color:var(--muted);font-variant-numeric:tabular-nums}
+.eps span.vu{background:rgba(40,224,160,.15);color:var(--ok)}
+.notes{display:grid;gap:4px;font-size:.84rem}
+.notes div{display:flex;justify-content:space-between;gap:10px;padding:6px 10px;border-radius:8px;background:var(--bg2)}
+.notes b{color:#ffd76a}
+.toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);opacity:0;transition:.2s;pointer-events:none;
+  background:var(--card2);border:1px solid var(--line2);padding:9px 15px;border-radius:10px;font-size:.86rem;z-index:9}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast.bad{border-color:var(--bad);color:#ffb3b3}
+@media (max-width:820px){ main{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.2" y="6.8" width="2.3" height="10.4" rx="1.15" fill="#fff" opacity=".6"/><path d="M9.6 7.4v9.2c0 .9 1 1.4 1.7.9l6.6-4.6c.6-.4.6-1.4 0-1.8l-6.6-4.6c-.7-.5-1.7 0-1.7.9z" fill="#fff"/></svg></span>
+  <h1>netflo<b>x</b> · Comptes de tes potes</h1>
+  <div class="gap"></div>
+  <a class="lien" href="index.html">← Bibliothèque</a>
+</header>
+<main>
+  <section>
+    <h2>Comptes</h2>
+    <div class="liste" id="liste"><div class="vide">Chargement…</div></div>
+  </section>
+  <section class="detail" id="detail"><div class="vide">Choisis un compte pour voir ce qu'il a regardé et noté.</div></section>
+</main>
+<div class="toast" id="toast"></div>
+<script src="js/01-outils.js"></script>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+let toastT = 0;
+function toast(msg, genre){
+  const t = $('#toast'); t.textContent = msg; t.className = 'toast on' + (genre ? ' ' + genre : '');
+  clearTimeout(toastT); toastT = setTimeout(() => { t.className = 'toast'; }, 2600);
+}
+async function api(action, d){
+  try {
+    const r = await fetch('__admin/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d || {}) });
+    return await r.json();
+  } catch(e){ return { ok: false, erreur: 'Le partage ne répond pas : lance partager.bat' }; }
+}
+function titreSerie(cle){ try { return prettify(splitTags(cle).name) || cle; } catch(e){ return cle; } }
+function nomEpisode(rel){
+  const m = /saison\s*(\d+)/i.exec(rel), n = /_(\d+)\.[a-z0-9]+$/i.exec(rel);
+  return (m ? 'S' + m[1] + ' · ' : '') + (n ? 'Ép. ' + n[1] : rel.split('/').pop());
+}
+function ilYA(sec){
+  if (!sec) return 'jamais';
+  const d = Date.now() / 1000 - sec;
+  if (d < 120) return 'à l’instant';
+  if (d < 3600) return 'il y a ' + Math.round(d / 60) + ' min';
+  if (d < 86400) return 'il y a ' + Math.round(d / 3600) + ' h';
+  if (d < 86400 * 30) return 'il y a ' + Math.round(d / 86400) + ' j';
+  return new Date(sec * 1000).toLocaleDateString('fr-FR');
+}
+let choisi = null;
+
+async function charger(){
+  const r = await api('liste');
+  if (!r.ok){ $('#liste').innerHTML = '<div class="vide">' + esc(r.erreur || 'Impossible de lire les comptes') + '</div>'; return; }
+  $('#liste').innerHTML = r.comptes.length ? r.comptes.map(c =>
+    '<button class="compte' + (c.id === choisi ? ' on' : '') + '" data-id="' + c.id + '">' +
+      '<span class="av">' + esc((c.pseudo || '?').slice(0, 1).toUpperCase()) + '</span>' +
+      '<span><b>' + esc(c.pseudo) + (c.hote ? '<span class="badge">hôte</span>' : '') + '</b>' +
+        '<small>Vu ' + esc(ilYA(c.actif)) + ' · ' + c.appareils + ' appareil' + (c.appareils > 1 ? 's' : '') + ' connecté' + (c.appareils > 1 ? 's' : '') + '</small></span>' +
+      '<span class="chiffres"><b>' + c.vus + '</b> vus<br>' + c.series + ' série' + (c.series > 1 ? 's' : '') + '</span>' +
+    '</button>').join('')
+    : '<div class="vide">Aucun compte pour l’instant. Tes potes en créent un depuis le bouton en haut à droite du site.</div>';
+}
+$('#liste').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-id]');
+  if (b){ choisi = b.dataset.id; charger(); detail(); }
+});
+
+async function detail(){
+  const r = await api('detail', { id: choisi });
+  if (!r.ok){ $('#detail').innerHTML = '<div class="vide">' + esc(r.erreur) + '</div>'; return; }
+  const c = r.compte;
+  $('#detail').innerHTML =
+    '<div><h3>' + esc(c.pseudo) + (c.hote ? ' <span class="badge">compte de l’hôte</span>' : '') + '</h3>' +
+    '<div class="meta">Créé le ' + esc(new Date((c.cree || 0) * 1000).toLocaleDateString('fr-FR')) + ' · actif ' + esc(ilYA(c.actif)) +
+    ' · ' + c.vus + (c.vus > 1 ? ' épisodes vus, ' : ' épisode vu, ') + c.enCours + ' en cours</div></div>' +
+
+    '<div><h2>Mot de passe</h2><form class="formule" id="fMdp"><input name="mdp" type="text" placeholder="Nouveau mot de passe (4 caractères min.)" autocomplete="off">' +
+      '<button class="btn" type="submit">Changer</button></form>' +
+      '<div class="meta" style="margin-top:6px">Il sera déconnecté partout : donne-lui le nouveau.</div></div>' +
+
+    '<div><h2>Pseudo</h2><form class="formule" id="fNom"><input name="pseudo" value="' + esc(c.pseudo) + '" maxlength="24">' +
+      '<button class="btn" type="submit">Renommer</button></form></div>' +
+
+    '<div class="actions">' +
+      '<label class="case"><input type="checkbox" id="cHote"' + (c.hote ? ' checked' : '') + '> Compte de l’hôte (ses notes comptent comme les tiennes)</label>' +
+    '</div>' +
+    '<div class="actions">' +
+      '<button class="btn" id="bDeco">' + (c.appareils > 1 ? 'Déconnecter ses ' + c.appareils + ' appareils' : 'Le déconnecter') + '</button>' +
+
+      '<button class="btn danger" id="bSuppr">Supprimer le compte</button>' +
+    '</div>' +
+
+    '<div><h2>Ce qu’il a regardé</h2>' + (r.series.length ? '<div style="display:grid;gap:8px">' + r.series.map(s =>
+      '<div class="serie"><div class="t"><b>' + esc(titreSerie(s.serie)) + '</b><span>' + s.vus + (s.total ? ' / ' + s.total : '') + ' vus</span></div>' +
+      (s.total ? '<div class="jauge"><i style="width:' + Math.min(100, Math.round(100 * s.vus / s.total)) + '%"></i></div>' : '') +
+      '<div class="eps">' + s.episodes.map(e => '<span class="' + (e.vu ? 'vu' : '') + '" title="' + (e.vu ? 'vu' : e.pct + ' %') + '">' +
+        esc(nomEpisode(e.rel)) + (e.vu ? ' ✓' : ' · ' + e.pct + ' %') + '</span>').join('') + '</div></div>').join('') + '</div>'
+      : '<div class="vide">Rien regardé avec ce compte pour l’instant.</div>') + '</div>' +
+
+    '<div><h2>Ses notes</h2>' + (r.notes.length ? '<div class="notes">' + r.notes.map(n =>
+      '<div><span>' + esc(titreSerie(n.serie)) + (n.episode ? ' · ' + esc(nomEpisode(n.episode)) : ' (la série)') + '</span><b>★ ' +
+      String(n.note).replace('.', ',') + '</b></div>').join('') + '</div>'
+      : '<div class="vide">Aucune note.</div>') + '</div>';
+
+  $('#fMdp').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const res = await api('mdp', { id: choisi, mdp: ev.target.mdp.value });
+    if (!res.ok) return toast(res.erreur, 'bad');
+    toast('Mot de passe changé : ' + c.pseudo + ' doit se reconnecter'); charger(); detail();
+  });
+  $('#fNom').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const res = await api('renommer', { id: choisi, pseudo: ev.target.pseudo.value });
+    if (!res.ok) return toast(res.erreur, 'bad');
+    choisi = res.id; toast('Renommé : il doit se reconnecter avec ce pseudo'); charger(); detail();
+  });
+  $('#cHote').addEventListener('change', async (ev) => {
+    const res = await api('hote', { id: choisi, actif: ev.target.checked });
+    if (!res.ok) return toast(res.erreur, 'bad');
+    toast(ev.target.checked ? 'Ses notes comptent maintenant comme les tiennes' : 'Ses notes comptent de nouveau en invité'); charger();
+  });
+  $('#bDeco').addEventListener('click', async () => {
+    const res = await api('deconnecter', { id: choisi });
+    if (!res.ok) return toast(res.erreur, 'bad');
+    toast('Déconnecté de tous ses appareils'); charger(); detail();
+  });
+  $('#bSuppr').addEventListener('click', async () => {
+    if (!confirm('Supprimer le compte « ' + c.pseudo + ' » ?\nSes notes restent comptées. Une copie est gardée dans comptes/supprimes/.')) return;
+    const res = await api('supprimer', { id: choisi });
+    if (!res.ok) return toast(res.erreur, 'bad');
+    toast('Compte supprimé'); choisi = null;
+    $('#detail').innerHTML = '<div class="vide">Choisis un compte pour voir ce qu’il a regardé et noté.</div>'; charger();
+  });
+}
+charger();
+</script>
+</body>
+</html>

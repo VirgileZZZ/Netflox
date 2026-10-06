@@ -374,7 +374,8 @@ $('#svOut').addEventListener('click', () => { zoomAt(innerWidth/2, innerHeight/2
 $('#svLevel').addEventListener('click', () => { resetZoom(); svPoke(); });
 addEventListener('resize', () => { if (!SV.hidden && svZoom > 1) applyZoom(); });
 addEventListener('keydown', (ev) => {
-  if (SV.hidden || ev.target.matches('input,textarea')) return;
+  if (SV.hidden || ev.ctrlKey || ev.metaKey || ev.altKey || ev.target.matches('input,textarea,select')) return;
+
   const k = ev.key;
   if (k === 'Escape'){ closeScan(); return; }
   const fwd = scanDir() === 'ltr' ? 'ArrowRight' : 'ArrowLeft';

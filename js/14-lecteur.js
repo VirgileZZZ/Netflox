@@ -108,8 +108,15 @@ function buildSubMenu(){
     '<button data-sub="-1"' + (actif < 0 ? ' class="on"' : '') + '>Aucun</button>' +
     pistes.map((t,i) => '<button data-sub="' + i + '"' +
       (i === actif ? ' class="on"' : '') + '>' + esc(t.label || nomLangue(t.language)) +
-      '</button>').join('');
+      '</button>').join('') +
+    // les sous-titres se deplacent au doigt: le dire, et offrir un retour en bas sans double-clic
+    (pistes.length ? '<div class="msep"></div>' + (store.get('subpos', null)
+      ? '<button data-subpos="">Remettre les sous-titres en bas</button>'
+      : '<p class="mnote">Astuce : glisse les sous-titres pour les déplacer</p>') : '');
+  const bas = $('#subMenu [data-subpos]');
+  if (bas) bas.addEventListener('click', () => { store.set('subpos', null); placerSousTitres(posDefaut()); buildSubMenu(); });
   $$('[data-sub]', $('#subMenu')).forEach(b => b.addEventListener('click', () => {
+
     const i = +b.dataset.sub;
     stVoulue = i < 0 ? '' : (pistes[i].language || '');
     pistes.forEach((t,k) => { t.mode = k === i ? modeAllume() : 'disabled'; });
@@ -443,9 +450,27 @@ function poke(){
   hideT = setTimeout(() => { if (!V.paused && $('#pErr').hidden) P.classList.add('hide-ui'); }, 2800);
 }
 P.addEventListener('mousemove', poke);
+/* Au doigt, les commandes cachees ne se touchent pas a l'aveugle: le premier
+   tap les fait seulement revenir. Avant, le tap reveillait l'interface (le
+   mousemove emule arrive avant le clic) puis touchait le bouton dessous — la
+   croix fermait le lecteur, « suivant » changeait d'episode. Et toucher
+   l'image quand l'interface est cachee la montre, comme sur YouTube, au lieu
+   de mettre en pause sans rien voir. */
+let toucherReveil = 0;
+P.addEventListener('pointerdown', (ev) => {
+  if (ev.pointerType !== 'mouse' && P.classList.contains('hide-ui')) toucherReveil = Date.now();
+}, true);
+P.addEventListener('click', (ev) => {
+  if (Date.now() - toucherReveil < 700 && !ev.target.closest('.pcues')){
+    toucherReveil = 0;
+    ev.stopPropagation(); ev.preventDefault();
+    poke();
+  }
+}, true);
 P.addEventListener('click', (ev) => {
   if (ev.target === V || ev.target === P){ V.paused ? V.play() : V.pause(); poke(); }
 });
+
 P.addEventListener('dblclick', (ev) => { if (ev.target === V || ev.target === P) toggleFull(); });
 $('#pClose').addEventListener('click', closePlayer);
 $('#pPlay').addEventListener('click', () => V.paused ? V.play() : V.pause());
@@ -804,7 +829,9 @@ function showNext(){
   if (!n || $('#nextCard').classList.contains('on')) return;
   hideSkip();                                    // la carte prend le relais
   const a = S.byKey.get(n.anime);
-  $('#nName').textContent = (a ? a.title + ' · ' : '') + n.title;
+  $('#nName').textContent = (a ? a.title + ' · ' : '') + titreEpisode(n);
+  $('#nImg').parentNode.classList.toggle('spoil', !!classeSpoil(n));
+
   const th = store.get('th.' + n.rel, null);
   if (th){ $('#nImg').src = th; $('#nImg').style.display = ''; }
   else   { $('#nImg').removeAttribute('src'); $('#nImg').style.display = 'none'; }
@@ -837,7 +864,15 @@ function playNext(force){
   const n = nextEpisode();
   hideNext();
   finirEpisode(true);
-  if (!n) { if (force) toast('Dernier épisode de la série'); else closePlayer(); return; }
+  if (!n){
+    if (force) return toast('C’est le dernier épisode de la série');
+    // la fin du dernier episode: on le dit, et on revient sur la fiche plutot que de disparaitre
+    const a = S.current && S.byKey.get(S.current.anime);
+    closePlayer();
+    if (a){ S.view = 'anime'; S.animeKey = a.key; render(); scrollTo(0, 0); toast('Fin de « ' + a.title + ' » : tu as tout vu', 'ok'); }
+    return;
+  }
+
   openPlayer(n);
 }
 $('#nGo').addEventListener('click', () => playNext(true));
@@ -845,7 +880,12 @@ $('#nNo').addEventListener('click', hideNext);
 
 /* --------------------------------------------------- raccourcis ----- */
 addEventListener('keydown', (ev) => {
-  if (P.hidden || ev.target.matches('input,textarea')) return;
+  // Ctrl+F, Ctrl+R, Alt+fleches: au navigateur, pas au lecteur
+  if (P.hidden || ev.ctrlKey || ev.metaKey || ev.altKey || ev.target.matches('input,textarea,select')) return;
+  // Espace sur un bouton: c'est lui qui agit, sinon lecture/pause partait deux fois
+  if (ev.key === ' ' && ev.target.closest('button,[role=slider]')) return;
+  // Echap ferme d'abord un menu ouvert, pas le lecteur
+  if (ev.key === 'Escape' && MENUS.some(m => !$(m).hidden)){ MENUS.forEach(m => { $(m).hidden = true; }); return; }
   const k = ev.key.toLowerCase();
   if (k === ' ' || k === 'k'){ ev.preventDefault(); V.paused ? V.play() : V.pause(); }
   else if (ev.key === 'ArrowRight'){ ev.preventDefault(); skip(ev.shiftKey ? 60 : 10); }

@@ -126,3 +126,7 @@ Desktop.ini:encryptable
 
 # --- Comptes des invites: empreintes de mots de passe, sessions ---
 comptes/
+
+# --- Icones de l application (les .png sont ignores plus haut) ---
+!icones/
+!icones/*.png

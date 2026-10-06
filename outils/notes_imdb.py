@@ -439,6 +439,10 @@ def appliquer(videos, series, plan, notes, titres, log, bavard=False):
             continue
         sc_chemin = os.path.join(chemin, ACCOMPAGNEMENT)
         sc = lire_json(sc_chemin, None)
+        if sc is None and os.path.exists(sc_chemin):
+            # present mais illisible: le recreer vide effacerait tout le reste
+            log(couleur("illisible, laisse tel quel :", "91") + " " + dossier)
+            continue
         if sc is None:
             sc = {"version": 1, "serie": dossier}
         elif not isinstance(sc, dict):
