@@ -133,6 +133,9 @@ body:has(#comptePanel:not([hidden])) #btnCompte .tip,body:has(#reglagesPanel:not
 .cp-err:empty{display:none}
 .cp-note{font-size:.74rem;color:var(--dim)}
 .cp-sortir{justify-self:start}
+.cp-gerer{font-size:.84rem;font-weight:700;color:#c4b5ff;text-decoration:none;padding:9px 11px;border-radius:10px;background:rgba(124,92,255,.14)}
+.cp-gerer:hover{background:rgba(124,92,255,.24)}
+
 .cp-hote{display:flex;gap:10px;align-items:flex-start;padding:10px 11px;border-radius:10px;background:var(--card);cursor:pointer}
 .cp-hote input{accent-color:var(--accent2);width:16px;height:16px;margin-top:2px;flex:none}
 .cp-hote b{display:block;font-size:.85rem}
@@ -432,12 +435,6 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
   display:flex;gap:15px;align-items:center;padding:10px;border-radius:13px;background:var(--card);
   border:1px solid var(--line);cursor:pointer;transition:.15s;
 }
-/* la coche « vu » d'un episode: visible, au lieu du seul clic droit */
-.epvu{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;
-  border:1.5px solid var(--line2);color:var(--dim);transition:.15s}
-.epvu:hover{color:var(--text);border-color:var(--muted)}
-.epvu.on{background:rgba(40,224,160,.16);border-color:rgba(40,224,160,.55);color:var(--ok)}
-.epvu:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
 /* une aide a la premiere ouverture du fil d'edits */
 .ed-aide{position:absolute;inset:0;z-index:8;display:grid;place-items:center;background:rgba(0,0,0,.55);cursor:pointer}
 .ed-aide div{display:grid;gap:12px;justify-items:center;text-align:center;padding:22px 26px;border-radius:16px;background:rgba(14,14,20,.94);
@@ -449,7 +446,6 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
 @media (pointer:coarse){
   .iconbtn{width:44px;height:44px}
   .ctx button{padding:12px 12px}
-  .epvu{width:40px;height:40px}
 }
 .ep:hover{background:var(--card2);border-color:var(--line2);transform:translateX(3px)}
 .ep:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -493,6 +489,10 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
    invisibles: il faut leur retirer le filtre. */
 .player.jouant *{backdrop-filter:none}
 .player video{width:100%;height:100%;object-fit:contain;background:#000}
+/* les commandes natives du navigateur restent cachees, quoi qu'il arrive */
+.player video::-webkit-media-controls,.ed-slide video::-webkit-media-controls,
+.player video::-webkit-media-controls-enclosure,.ed-slide video::-webkit-media-controls-enclosure{display:none !important}
+
 .pfade{position:absolute;left:0;right:0;transition:opacity .25s,transform .25s;z-index:3}
 /* Les sous-titres: dessines par la page et non par Chrome, pour les poser
    sans fond et les deplacer. Le point (left,top) est le bas de la replique. */
@@ -1056,15 +1056,14 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
   .eplist{padding-left:16px;padding-right:16px;gap:9px}
   .ep{
     display:grid;align-items:center;padding:9px;gap:0 11px;
-    grid-template-columns:auto auto minmax(0,1fr) auto auto;
-    grid-template-areas:"num th info vu go" "num th note vu go";
+    grid-template-columns:auto auto minmax(0,1fr) auto;
+    grid-template-areas:"num th info go" "num th note go";
   }
   .ep:hover{transform:none}
   .ep .num{grid-area:num;width:20px;font-size:.92rem}
   .ep .epth{grid-area:th;width:76px}
   .ep .epinfo{grid-area:info}
   .ep .go{grid-area:go;width:34px;height:34px}
-  .ep .epvu{grid-area:vu;margin-right:6px}
   .ep .rate{grid-area:note;margin-top:5px;font-size:.9rem;opacity:1}
   /* sans survol, une note vide ne se remplira jamais d'ici: qu'elle rende sa place */
   .ep .rate:not(.has){display:none}
@@ -1368,24 +1367,24 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
      pas charger de module, le navigateur y voit une requete inter-origines
      et la refuse. Ils partagent donc la meme portee globale, comme lorsque
      tout tenait dans une seule balise — et l'ordre ci-dessous compte. -->
-<script src="js/01-outils.js?v=20261006q"></script>
-<script src="js/02-algo-edits.js?v=20261006q"></script>
-<script src="js/03-etat.js?v=20261006q"></script>
-<script src="js/04-dossier.js?v=20261006q"></script>
-<script src="js/05-scan.js?v=20261006q"></script>
-<script src="js/06-accompagnement.js?v=20261006q"></script>
-<script src="js/07-rendu.js?v=20261006q"></script>
-<script src="js/08-partage.js?v=20261006q"></script>
-<script src="js/09-fiches.js?v=20261006q"></script>
-<script src="js/10-vignettes.js?v=20261006q"></script>
-<script src="js/11-documents.js?v=20261006q"></script>
-<script src="js/12-lecteur-scans.js?v=20261006q"></script>
-<script src="js/13-fil-edits.js?v=20261006q"></script>
-<script src="js/14-lecteur.js?v=20261006q"></script>
-<script src="js/15-demarrage.js?v=20261006q"></script>
-<script src="js/16-compte.js?v=20261006q"></script>
-<script src="js/17-reglages.js?v=20261006q"></script>
-<script src="js/18-retour.js?v=20261006q"></script>
+<script src="js/01-outils.js?v=20261006t"></script>
+<script src="js/02-algo-edits.js?v=20261006t"></script>
+<script src="js/03-etat.js?v=20261006t"></script>
+<script src="js/04-dossier.js?v=20261006t"></script>
+<script src="js/05-scan.js?v=20261006t"></script>
+<script src="js/06-accompagnement.js?v=20261006t"></script>
+<script src="js/07-rendu.js?v=20261006t"></script>
+<script src="js/08-partage.js?v=20261006t"></script>
+<script src="js/09-fiches.js?v=20261006t"></script>
+<script src="js/10-vignettes.js?v=20261006t"></script>
+<script src="js/11-documents.js?v=20261006t"></script>
+<script src="js/12-lecteur-scans.js?v=20261006t"></script>
+<script src="js/13-fil-edits.js?v=20261006t"></script>
+<script src="js/14-lecteur.js?v=20261006t"></script>
+<script src="js/15-demarrage.js?v=20261006t"></script>
+<script src="js/16-compte.js?v=20261006t"></script>
+<script src="js/17-reglages.js?v=20261006t"></script>
+<script src="js/18-retour.js?v=20261006t"></script>
 
 <script>
 /* L'application installable (icone sur l'ecran d'accueil, plein ecran): seulement

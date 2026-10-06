@@ -126,7 +126,15 @@ function ilYA(sec){
 let choisi = null;
 
 async function charger(){
+  // ouverte d'un double-clic, la page n'a pas de serveur a qui parler: on dit comment faire
+  if (location.protocol === 'file:'){
+    $('#liste').innerHTML = '<div class="vide">Cette page s’ouvre par le partage, pas d’un double-clic.<br><br>' +
+      'Lance <b>partager.bat</b> : la fenêtre affiche « Comptes de tes potes : http://127.0.0.1:…/comptes.html ». ' +
+      'Ouvre cette adresse sur ce PC. Tu peux aussi passer par le bouton Compte du site.</div>';
+    return;
+  }
   const r = await api('liste');
+
   if (!r.ok){ $('#liste').innerHTML = '<div class="vide">' + esc(r.erreur || 'Impossible de lire les comptes') + '</div>'; return; }
   $('#liste').innerHTML = r.comptes.length ? r.comptes.map(c =>
     '<button class="compte' + (c.id === choisi ? ' on' : '') + '" data-id="' + c.id + '">' +

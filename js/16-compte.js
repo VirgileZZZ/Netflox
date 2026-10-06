@@ -157,6 +157,7 @@ function remplirCompte(msg){
           '<span><b>C’est mon compte d’hôte</b><small>Mes notes comptent comme celles de l’hôte, ' +
           'même depuis le lien partagé, et jamais en double.</small></span></label>'
         : COMPTE.hote ? '<p class="cp-note">Compte de l’hôte : tes notes comptent comme les siennes.</p>' : '') +
+      (COMPTE.machine ? '<a class="cp-gerer" href="comptes.html" target="_blank" rel="noopener">Gérer les comptes de tes potes →</a>' : '') +
       '<button class="btn btn-ghost cp-sortir" data-cp="deconnexion">Se déconnecter</button>';
     return;
   }
@@ -165,6 +166,8 @@ function remplirCompte(msg){
     '<h4>Compte</h4>' +
     '<p class="cp-aide">Facultatif : tout marche sans. Mais sans compte, tes infos restent dans ce navigateur ' +
     'et se perdent avec un nouveau lien.</p>' +
+    (COMPTE.machine ? '<a class="cp-gerer" href="comptes.html" target="_blank" rel="noopener">Gérer les comptes de tes potes →</a>' : '') +
+
     '<div class="cp-onglets">' +
       '<button type="button" data-cp-onglet="connexion"' + (ins ? '' : ' class="on"') + '>Se connecter</button>' +
       '<button type="button" data-cp-onglet="inscription"' + (ins ? ' class="on"' : '') + '>Créer un compte</button>' +

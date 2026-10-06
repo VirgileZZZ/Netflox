@@ -1366,6 +1366,7 @@ def partage_local():
                          "Copie ce lien pour le partager.", "90"))
     print("  " + couleur("A ouvrir depuis un appareil connecte a la meme box.", "90"))
     print("  " + couleur("Sur cette machine : http://127.0.0.1:%d" % port, "90"))
+    print("  " + couleur("Comptes de tes potes : http://127.0.0.1:%d/comptes.html" % port, "90"))
     print("  " + couleur("Si Windows demande d'autoriser Python, accepte (reseau prive).", "93"))
     print()
     attendre(serveur, None)
@@ -1378,6 +1379,8 @@ def partage_internet():
     serveur = Serveur(("127.0.0.1", port), Handler)
     threading.Thread(target=serveur.serve_forever, daemon=True).start()
     print("  2/3  Serveur local sur " + couleur("http://127.0.0.1:%d" % port, "96"))
+    print("       " + couleur("Comptes de tes potes : http://127.0.0.1:%d/comptes.html" % port, "90"))
+
 
     exe = trouver_cloudflared()
     if not exe:

@@ -449,7 +449,24 @@ function poke(){
   clearTimeout(hideT);
   hideT = setTimeout(() => { if (!V.paused && $('#pErr').hidden) P.classList.add('hide-ui'); }, 2800);
 }
+/* Jamais les commandes du navigateur par-dessus les notres: Chrome les offre
+   au clic droit sur la video (« Afficher les commandes »), une extension peut
+   les poser. Un ami voyait ainsi deux barres de lecture superposees. Le menu
+   du navigateur ne s'ouvre plus sur la video, et l'attribut est retire des
+   qu'il apparait — sur le lecteur comme dans le fil d'edits. */
+function sansCommandesNatives(v){
+  if (!v || v.dataset.sansNatif) return;
+  v.dataset.sansNatif = '1';
+  v.controls = false;
+  v.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  new MutationObserver(() => { if (v.controls) v.controls = false; })
+    .observe(v, { attributes: true, attributeFilter: ['controls'] });
+}
+sansCommandesNatives(V);
+new MutationObserver(() => document.querySelectorAll('#edRail video').forEach(sansCommandesNatives))
+  .observe(document.getElementById('edRail'), { childList: true, subtree: true });
 P.addEventListener('mousemove', poke);
+
 /* Au doigt, les commandes cachees ne se touchent pas a l'aveugle: le premier
    tap les fait seulement revenir. Avant, le tap reveillait l'interface (le
    mousemove emule arrive avant le clic) puis touchait le bouton dessous — la

@@ -23,7 +23,14 @@ const REGLAGES = [
   { cle: 'cacherTitres', titre: 'Cacher les titres',
     aide: 'Ceux des épisodes pas encore vus : « Épisode 5 » au lieu de ce qu’il raconte.' }
 ];
-function reglage(k){ const r = store.get('reglages', {}) || {}; return r[k] === true; }
+/* Par defaut: miniatures floutees (une image d'episode spoile vite), titres
+   visibles. Un reglage jamais touche suit ce defaut. */
+const REGLAGES_DEFAUT = { flouMiniatures: true, cacherTitres: false };
+function reglage(k){
+  const r = store.get('reglages', {}) || {};
+  return typeof r[k] === 'boolean' ? r[k] : !!REGLAGES_DEFAUT[k];
+}
+
 function poserReglage(k, v){
   const r = store.get('reglages', {}) || {};
   r[k] = !!v;
