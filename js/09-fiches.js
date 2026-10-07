@@ -879,6 +879,41 @@ function wireFilters(root, apres){
   }));
 }
 
+/* La page d'un episode: lui en haut, et les edits qui le montrent. On y
+   arrive en touchant l'episode affiche sous l'oeuvre dans le fil d'edits. */
+function renderEpisode(rel){
+  const view = $('#view-list'); view.hidden = false;
+  const ep = findEp(rel), a = ep && S.byKey.get(ep.anime);
+  if (!ep || !a){ S.view = 'home'; view.hidden = true; return renderHome(); }
+  const p = getProgress(ep), edits = editsDeLEpisode(ep);
+  const LIRE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="m6 4 14 8-14 8z"/></svg>';
+  view.innerHTML =
+    '<div class="pagehead epage">' +
+      '<div><button class="backbtn" data-anime="' + esc(a.key) + '">‹ ' + esc(a.title) + '</button></div>' +
+      '<div class="epage-haut">' +
+        '<div class="epage-th' + classeSpoil(ep) + '" data-thumb="' + esc(ep.rel) + '"></div>' +
+        '<div class="epage-info">' +
+          '<div class="epage-k">' + esc(a.title + ' · ' + nomCourtEpisode(ep)) + '</div>' +
+          '<h1>' + esc(titreEpisode(ep)) + '</h1>' +
+          '<div class="epage-meta">' +
+            (p && p.done ? '<span class="chip">Vu</span>' : p && p.t > 20 ? '<span class="chip">En cours</span>' : '') +
+            rateHTML('e:' + ep.rel) + '</div>' +
+          '<div class="hero-actions">' +
+            '<button class="btn btn-light" data-play="' + esc(ep.rel) + '">' + LIRE + 'Lecture</button>' +
+            (edits.length ? '<button class="btn btn-ghost" data-edits-ep="' + esc(ep.rel) + '">⚡ ' +
+              fmtCount(edits.length, 'edit', 'edits') + ' de l’épisode</button>' : '') +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    (edits.length
+      ? '<section class="searchsec"><div class="row-head"><h2>Edits de cet épisode</h2><span class="cnt">' +
+          fmtCount(edits.length, 'edit', 'edits') + '</span></div><div class="ep-edits">' +
+          edits.map(x => '<button class="ep-edit" data-edits-ep="' + esc(ep.rel) + '" data-depuis="' + esc(x.rel) + '">' +
+            LIRE + esc(x.title) + '</button>').join('') + '</div></section>'
+      : '<div class="empty"><b>Aucun edit rangé sur cet épisode</b>Les edits se rangent par épisode dans annoter-edits.html.</div>');
+}
+
 function renderList(kind){
   const view = $('#view-list'); view.hidden = false;
 
@@ -927,8 +962,15 @@ function renderList(kind){
 
 /* ------------------------------------------------------ interactions */
 document.addEventListener('click', (ev) => {
-  const t = ev.target.closest('[data-rate-n],[data-forget],[data-fav],[data-play],[data-anime],[data-go],[data-rail],[data-doc],[data-docs],[data-scan],[data-edits],[data-edits-tous]');
+  const t = ev.target.closest('[data-ep-page],[data-edits-ep],[data-rate-n],[data-forget],[data-fav],[data-play],[data-anime],[data-go],[data-rail],[data-doc],[data-docs],[data-scan],[data-edits],[data-edits-tous]');
   if (!t) return;
+  // la page d'un episode (depuis le fil d'edits), et le fil des edits d'un episode
+  if (t.dataset.epPage){
+    if (!ED.hidden) closeEdits();
+    S.view = 'episode'; S.epRel = t.dataset.epPage; S.query = ''; $('#q').value = '';
+    render(); scrollTo(0, 0); return;
+  }
+  if (t.dataset.editsEp){ openEditsEpisode(t.dataset.editsEp, t.dataset.depuis); return; }
 
   // les etoiles vivent dans une ligne d'episode, elle-meme cliquable: la note
   // se pose sans lancer la lecture
@@ -1166,6 +1208,10 @@ function ouvrirCtx(e, x, y){
     '<div class="ctx-trait"></div>' +
     (vu ? '<button role="menuitem" data-ctx="pasvu">' + ICO_PASVU + 'Marquer comme non vu</button>'
         : '<button role="menuitem" data-ctx="vu">' + ICO_VU + 'Marquer comme vu</button>') +
+    // les edits qui montrent cet episode: seulement s'il y en a
+    (editsDeLEpisode(e).length ? '<button role="menuitem" data-ctx="edits">' +
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 3 5 13.5h6L10 21l9-11h-6z"/></svg>' +
+      'Voir les edits de l’épisode<small>' + editsDeLEpisode(e).length + '</small></button>' : '') +
     (avant.length > 1 && reste > (vu ? 0 : 1)
       ? '<button role="menuitem" data-ctx="jusque">' + ICO_JUSQUE + 'Marquer vu jusqu\'ici<small>' +
         fmtCount(reste, 'épisode', 'épisodes') + '</small></button>' : '');
@@ -1192,6 +1238,8 @@ CTX.addEventListener('click', (ev) => {
   const e = ctxEp, a = S.byKey.get(e.anime), quoi = b.dataset.ctx;
   fermerCtx();
   if (quoi === 'lire'){ openPlayer(e); return; }
+  if (quoi === 'edits'){ openEditsEpisode(e.rel); return; }
+
   let eps = [e];
   if (quoi === 'jusque' && a) eps = a.episodes.filter(x => x.idx <= e.idx && !(getProgress(x) || {}).done);
   const avant = marquerVu(eps, quoi !== 'pasvu');

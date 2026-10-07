@@ -658,7 +658,46 @@ function edPeindreNom(e){
   const a = e ? S.byKey.get(e.anime) : null;
   b.textContent = a ? a.title : (edCtx ? edCtx.defaut : '');
   if (a) b.setAttribute('data-anime', a.key); else b.removeAttribute('data-anime');
+  // et l'episode qu'il montre, quand il est annote: un clic mene a sa page
+  const ep = e ? episodeDeLEdit(e) : null, be = $('#edEp');
+  if (!be) return;
+  if (ep){
+    const t = titreEpisode(ep);
+    be.textContent = nomCourtEpisode(ep) + (/^Épisode\s/.test(t) ? '' : ' — ' + t);
+    be.dataset.epPage = ep.rel; be.hidden = false;
+  } else { be.hidden = true; delete be.dataset.epPage; }
 }
+/* ------------------------------------------------ edits et episodes --
+ * L'annotation d'un edit (annoter-edits.html) dit l'episode qu'il montre.
+ * On s'en sert dans les deux sens: l'episode d'un edit (affiche sous
+ * l'oeuvre dans le fil), et les edits d'un episode (sa page, le clic droit). */
+function episodeDeLEdit(e){
+  const a = S.byKey.get(e.anime), v = spoilMap()[e.rel];
+  if (!a || !v || v === 'aucun' || v === 'suite') return null;
+  return a.episodes.find(x => x.rel === a.key + '/' + v) || null;
+}
+function nomCourtEpisode(ep){
+  const a = S.byKey.get(ep.anime);
+  const saison = a && a.seasonList.length > 1 ? seasonLabel(ep.seasonKey) + ' · ' : '';
+  return saison + 'Ép. ' + (ep.ep != null ? ep.ep : ep.idx + 1);
+}
+function editsDeLEpisode(ep){
+  const a = S.byKey.get(ep.anime);
+  if (!a) return [];
+  const court = ep.rel.slice(a.key.length + 1), sp = spoilMap();
+  return a.edits.filter(x => sp[x.rel] === court);
+}
+/** Le fil des edits d'un episode; `depuisRel` pour commencer sur l'un d'eux. */
+function openEditsEpisode(rel, depuisRel){
+  const ep = findEp(rel);
+  if (!ep) return;
+  const l = editsDeLEpisode(ep);
+  if (!l.length) return toast('Aucun edit rangé sur cet épisode', 'bad');
+  const a = S.byKey.get(ep.anime);
+  edSpoilsVisibles = false;
+  edOuvrir(l, (a ? a.title + ' · ' : '') + nomCourtEpisode(ep), 0, depuisRel || null, false);
+}
+
 function edOuvrir(edits, defaut, depart, garderRel, priorite){
   edPurgerStats();
   const tous = edits;

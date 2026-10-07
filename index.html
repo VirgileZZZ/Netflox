@@ -888,6 +888,27 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
 /* cliquable seulement quand l'oeuvre a une fiche a ouvrir */
 .ed-name .ed-oeuvre[data-anime]{cursor:pointer}
 .ed-name .ed-oeuvre[data-anime]:hover{color:var(--accent2)}
+/* l'episode que montre l'edit, sous l'oeuvre: il mene a la page de l'episode */
+.ed-name .ed-ep{display:block;max-width:100%;text-align:left;font-size:.8rem;font-weight:700;color:#ff8fb5;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;margin-top:1px}
+.ed-name .ed-ep:hover{text-decoration:underline}
+/* la page d'un episode */
+.epage{display:grid;gap:18px;padding-bottom:30px}
+.epage-haut{display:flex;gap:22px;align-items:flex-end;flex-wrap:wrap}
+.epage-th{position:relative;width:min(420px,100%);aspect-ratio:16/9;border-radius:14px;overflow:hidden;background:linear-gradient(135deg,#181828,#101019);flex:none}
+.epage-th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .4s}
+.epage-th img.in{opacity:1}
+.epage-info{display:grid;gap:8px;min-width:0;flex:1}
+.epage-k{font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:var(--accent2)}
+.epage-info h1{font-size:clamp(1.5rem,3vw,2.2rem);letter-spacing:-.03em;line-height:1.1;overflow-wrap:anywhere}
+.epage-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.ep-edits{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:14px clamp(20px,3.6vw,54px) 0}
+
+.ep-edit{display:flex;align-items:center;gap:9px;padding:12px 14px;border-radius:12px;background:var(--card);border:1px solid var(--line);
+  font-weight:600;font-size:.88rem;text-align:left;transition:.15s}
+.ep-edit:hover{background:var(--card2);border-color:var(--line2)}
+.ep-edit svg{flex:none;color:var(--accent2)}
+
 .ed-name span{font-size:.75rem;color:var(--dim)}
 .ed-count{font-size:.82rem;font-weight:700;color:#dcdcea;font-variant-numeric:tabular-nums;flex:none}
 /* Spoilers: eteint, un oeil barre et le nombre d'edits mis de cote; allume,
@@ -1335,7 +1356,7 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
   <div class="ed-rail" id="edRail"></div>
   <div class="ed-top">
     <button class="pbtn" id="edClose" aria-label="Fermer"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M19 12H5m0 0 6-6m-6 6 6 6"/></svg></button>
-    <div class="ed-name"><button class="ed-oeuvre" id="edTitle" title="Ouvrir la fiche de l’œuvre"></button><span id="edSub"></span></div>
+    <div class="ed-name"><button class="ed-oeuvre" id="edTitle" title="Ouvrir la fiche de l’œuvre"></button><button class="ed-ep" id="edEp" hidden title="Voir l’épisode et ses edits"></button><span id="edSub"></span></div>
     <span class="ed-count" id="edCount">0 / 0</span>
     <!-- desactive a chaque ouverture: les edits qui montrent la suite restent caches -->
     <button class="ed-spoil" id="edSpoil" aria-pressed="false">
@@ -1367,24 +1388,24 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
      pas charger de module, le navigateur y voit une requete inter-origines
      et la refuse. Ils partagent donc la meme portee globale, comme lorsque
      tout tenait dans une seule balise — et l'ordre ci-dessous compte. -->
-<script src="js/01-outils.js?v=20261007a"></script>
-<script src="js/02-algo-edits.js?v=20261007a"></script>
-<script src="js/03-etat.js?v=20261007a"></script>
-<script src="js/04-dossier.js?v=20261007a"></script>
-<script src="js/05-scan.js?v=20261007a"></script>
-<script src="js/06-accompagnement.js?v=20261007a"></script>
-<script src="js/07-rendu.js?v=20261007a"></script>
-<script src="js/08-partage.js?v=20261007a"></script>
-<script src="js/09-fiches.js?v=20261007a"></script>
-<script src="js/10-vignettes.js?v=20261007a"></script>
-<script src="js/11-documents.js?v=20261007a"></script>
-<script src="js/12-lecteur-scans.js?v=20261007a"></script>
-<script src="js/13-fil-edits.js?v=20261007a"></script>
-<script src="js/14-lecteur.js?v=20261007a"></script>
-<script src="js/15-demarrage.js?v=20261007a"></script>
-<script src="js/16-compte.js?v=20261007a"></script>
-<script src="js/17-reglages.js?v=20261007a"></script>
-<script src="js/18-retour.js?v=20261007a"></script>
+<script src="js/01-outils.js?v=20261007d"></script>
+<script src="js/02-algo-edits.js?v=20261007d"></script>
+<script src="js/03-etat.js?v=20261007d"></script>
+<script src="js/04-dossier.js?v=20261007d"></script>
+<script src="js/05-scan.js?v=20261007d"></script>
+<script src="js/06-accompagnement.js?v=20261007d"></script>
+<script src="js/07-rendu.js?v=20261007d"></script>
+<script src="js/08-partage.js?v=20261007d"></script>
+<script src="js/09-fiches.js?v=20261007d"></script>
+<script src="js/10-vignettes.js?v=20261007d"></script>
+<script src="js/11-documents.js?v=20261007d"></script>
+<script src="js/12-lecteur-scans.js?v=20261007d"></script>
+<script src="js/13-fil-edits.js?v=20261007d"></script>
+<script src="js/14-lecteur.js?v=20261007d"></script>
+<script src="js/15-demarrage.js?v=20261007d"></script>
+<script src="js/16-compte.js?v=20261007d"></script>
+<script src="js/17-reglages.js?v=20261007d"></script>
+<script src="js/18-retour.js?v=20261007d"></script>
 
 <script>
 /* L'application installable (icone sur l'ecran d'accueil, plein ecran): seulement

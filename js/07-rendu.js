@@ -88,6 +88,8 @@ function render(){
   else if (S.view === 'home')  renderHome();
   else if (S.view === 'anime') renderAnime(S.animeKey);
   else if (S.view === 'docs')  renderDocs(S.docKey);
+  else if (S.view === 'episode') renderEpisode(S.epRel);
+
   else                         renderList(S.view);
   paintNav();
   hydrate();
