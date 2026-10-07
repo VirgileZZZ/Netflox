@@ -22,7 +22,7 @@
 /* ====================================================== compte ===== */
 /* Ce qui suit le compte: ce qui est a l'invite. Les miniatures (th.) se
    refont toutes seules, et pesent trop pour voyager. */
-const COMPTE_PREFIXES = /^(pg|rd|sc|oubli)\./;
+const COMPTE_PREFIXES = /^(pg|rd|sc|oubli|fav)\./;
 const COMPTE_CLES = new Set(['edvus', 'edstats', 'inviteId', 'sublang', 'subpos', 'vol', 'rate',
                              'edMute', 'edVol', 'edRate', 'svMode', 'svFit', 'svDir', 'rsize', 'reglages']);
 
@@ -88,7 +88,7 @@ function compteFusionner(d){
       }
       const ici = store.get(k, null);
       if (ici == null) store.set(k, v);
-      else if (/^(pg|rd|sc)\./.test(k)){ if ((+v.at || 0) > (+ici.at || 0)) store.set(k, v); }
+      else if (/^(pg|rd|sc|fav)\./.test(k)){ if ((+v.at || 0) > (+ici.at || 0)) store.set(k, v); }
       else if (k.startsWith('oubli.')){ if (+v > +ici) store.set(k, v); }
       else if (k === 'edvus' || k === 'edstats'){
         if (typeof v === 'object' && typeof ici === 'object') store.set(k, Object.assign({}, v, ici));
@@ -97,6 +97,7 @@ function compteFusionner(d){
     }
   } finally { compteSilence = false; }
   edVusCache = edStatsCache = null;              // relues au prochain fil d'edits
+  favCache = null;
 }
 
 /* Au chargement, le serveur dit si les comptes existent chez lui et si un

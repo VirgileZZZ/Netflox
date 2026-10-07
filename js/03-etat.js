@@ -117,10 +117,30 @@ function setReadPos(rel, pct, key){
 }
 
 /* ------------------------------------------------------- favoris ---- */
-function favMap(){ return S.shared ? S.host.favs : (store.get('favs', {}) || {}); }
+/* Chez l'hote, le favori vit dans la fiche de la serie. Par le lien, chacun a
+   le sien: une cle fav.<serie> = { on, at } par serie, qui suit le compte.
+   Un favori retire garde sa cle (on:false) et sa date: sans elle, un autre
+   appareil du meme compte le rendrait au chargement suivant. */
+let favCache = null;
+function favMap(){
+  if (!S.shared) return store.get('favs', {}) || {};
+  if (!favCache){
+    favCache = {};
+    for (const k of store.keys()){
+      if (!k.startsWith('fav.')) continue;
+      const v = store.get(k, null);
+      if (v && v.on) favCache[k.slice(4)] = +v.at || 1;
+    }
+  }
+  return favCache;
+}
 function isFav(key){ return !!favMap()[key]; }
 function setFav(key, on){
-  if (lectureSeule()) return;
+  if (S.shared){
+    store.set('fav.' + key, { on: !!on, at: Date.now() });
+    favCache = null;
+    return;
+  }
   const all = favMap();
   if (on) all[key] = Date.now(); else delete all[key];
   store.set('favs', all);

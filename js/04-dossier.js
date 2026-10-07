@@ -115,14 +115,23 @@ async function fillMeta(files){
 const MANIFEST = 'bibliotheque-index.json';
 async function loadManifest(){
   let res;
-  try { res = await fetch(MANIFEST, { cache:'no-store' }); } catch(e){ return null; }
+  // no-cache, pas no-store: le navigateur garde l'index et demande au serveur
+  // s'il a change — un « non » de quelques octets plutot qu'un Mo par le tunnel
+  try { res = await fetch(MANIFEST, { cache:'no-cache' }); } catch(e){ return null; }
   if (!res || !res.ok) return null;
   let data;
   try { data = await res.json(); } catch(e){ return null; }
   if (!data || !Array.isArray(data.files)) return null;
   const base = typeof data.base === 'string' && data.base ? data.base : 'videos/';
   const files = [];
-  for (const row of data.files){
+  // un chapitre de scans numerote 1..N arrive en une ligne [dossier, ext, N]
+  const rows = data.files.slice();
+  for (const s of Array.isArray(data.suites) ? data.suites : []){
+    if (!Array.isArray(s) || typeof s[0] !== 'string' || typeof s[1] !== 'string') continue;
+    const n = Math.min(+s[2] || 0, 5000);
+    for (let i = 1; i <= n; i++) rows.push([s[0] + '/' + i + '.' + s[1], 0, 0]);
+  }
+  for (const row of rows){
     if (!Array.isArray(row) || typeof row[0] !== 'string') continue;
     const parts = row[0].split('/').filter(Boolean);
     if (!parts.length || !fichierUtile(parts)) continue;

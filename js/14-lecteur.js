@@ -126,6 +126,21 @@ function buildSubMenu(){
     buildSubMenu();
   }));
 }
+/* La touche C: eteint les sous-titres, ou rallume ceux d'avant — a defaut le
+   francais complet de l'episode, a defaut la premiere piste. */
+let stFrancais = '', stAvant = '';
+function basculerSousTitres(){
+  const pistes = [...V.textTracks];
+  if (!pistes.length){ osd('Pas de sous-titres pour cet épisode'); return; }
+  const existe = (l) => l && pistes.some(t => t.language === l);
+  if (existe(stVoulue)){ stAvant = stVoulue; stVoulue = ''; }
+  else stVoulue = [stAvant, stFrancais, pistes[0].language].find(existe) || '';
+  store.set('sublang', stVoulue);
+  appliquerSousTitres();
+  const p = pistes.find(t => stVoulue && t.language === stVoulue);
+  osd(p ? 'Sous-titres : ' + (p.label || nomLangue(p.language)) : 'Sous-titres désactivés');
+  if (!$('#subMenu').hidden) buildSubMenu();
+}
 /* La langue de sous-titres a afficher pour l'episode en cours. */
 let stVoulue = '';
 /**
@@ -270,6 +285,7 @@ async function poserSousTitres(ep){
     nb++;
   }
   if (retenue === null) stVoulue = francais;
+  stFrancais = francais;
   $('#pSubs').hidden = !nb;
   appliquerSousTitres();
 }
@@ -493,6 +509,7 @@ function zoneTap(x){
   return x < r.left + r.width / 3 ? -1 : x > r.right - r.width / 3 ? 1 : 0;
 }
 P.addEventListener('click', (ev) => {
+  if (geste.consomme){ geste.consomme = false; ev.stopPropagation(); ev.preventDefault(); return; }
   if (dernierType === 'mouse') return;
   const cache = Date.now() - toucherReveil < 700;
   const surImage = ev.target === V || ev.target === P;
@@ -527,6 +544,63 @@ P.addEventListener('dblclick', (ev) => {
   if (dernierType !== 'mouse') return;          // au doigt, le double-tap est gere plus haut
   if (ev.target === V || ev.target === P) toggleFull();
 });
+
+/* Deux gestes de plus sur l'image, comme dans les applis video:
+ *  - rester appuye: lecture en 2x tant que le doigt (ou le bouton) reste pose;
+ *  - au doigt, glisser de haut en bas: le volume. Pas sur iPhone, ou une page
+ *    ne regle pas le volume: seuls les boutons du telephone le font.
+ * Le clic qui suit le geste est avale: lacher l'appui long ne met pas en pause. */
+const geste = { id: null, x: 0, y: 0, t: null, rapide: false, vol: null, consomme: false, avant: 1 };
+const VOLUME_REGLABLE = (() => { const a = document.createElement('audio'); try { a.volume = .5; } catch(e){} return a.volume === .5; })();
+P.addEventListener('pointerdown', (ev) => {
+  if (ev.button || (ev.target !== V && ev.target !== P)) return;
+  clearTimeout(geste.t);
+  Object.assign(geste, { id: ev.pointerId, x: ev.clientX, y: ev.clientY, rapide: false, vol: null, consomme: false });
+  geste.t = setTimeout(() => {
+    geste.t = null;
+    if (V.paused || geste.id === null) return;
+    geste.rapide = true; geste.consomme = true; geste.avant = V.playbackRate;
+    V.playbackRate = 2;
+    osd('2× ▸▸', true);
+  }, 450);
+});
+P.addEventListener('pointermove', (ev) => {
+  if (ev.pointerId !== geste.id || geste.rapide) return;
+  if (geste.vol === null){
+    const dx = ev.clientX - geste.x, dy = ev.clientY - geste.y;
+    if (Math.hypot(dx, dy) < 14) return;
+    clearTimeout(geste.t); geste.t = null;
+    // la souris, un iPhone, ou un balayage de cote: ce n'est pas le volume
+    if (ev.pointerType === 'mouse' || !VOLUME_REGLABLE || Math.abs(dy) < Math.abs(dx) * 1.5){ geste.id = null; return; }
+    const o = sortie();
+    geste.vol = o.muted ? 0 : o.volume; geste.y = ev.clientY; geste.consomme = true;
+  }
+  const o = sortie();
+  o.volume = Math.max(0, Math.min(1, geste.vol - (ev.clientY - geste.y) / (P.clientHeight * .6)));
+  o.muted = o.volume === 0;
+  $('#pVol').value = o.volume; paintVol();
+  osd('Volume ' + Math.round(o.volume * 100) + ' %');
+});
+function finGeste(ev){
+  if (ev.pointerId !== geste.id) return;
+  clearTimeout(geste.t); geste.t = null; geste.id = null;
+  if (geste.rapide){ geste.rapide = false; V.playbackRate = geste.avant; osd(''); }
+  if (geste.vol !== null){ store.set('vol', sortie().volume); geste.vol = null; }
+}
+P.addEventListener('pointerup', finGeste);
+P.addEventListener('pointercancel', finGeste);
+
+/* Ce qu'un raccourci ou un geste vient de changer — vitesse, volume,
+   sous-titres — s'affiche un instant au milieu de l'image. */
+let osdT = 0;
+function osd(texte, tenir){
+  const el = $('#pOsd');
+  clearTimeout(osdT);
+  if (!texte){ el.classList.remove('on'); return; }
+  el.textContent = texte;
+  el.classList.add('on');
+  if (!tenir) osdT = setTimeout(() => el.classList.remove('on'), 900);
+}
 
 /* L'ecran ne s'eteint pas pendant qu'on regarde: un telephone se mettait en
    veille au milieu d'un episode. Rendu a la pause, repris au retour. */
@@ -585,7 +659,8 @@ $('#pPip').addEventListener('click', () => {
 });
 /* le volume agit sur ce qui sonne: la video, ou la piste a cote quand elle
    a pris le relais. La video reste coupee tant qu'une autre langue joue. */
-$('#pMute').addEventListener('click', () => { const o = sortie(); o.muted = !o.muted; paintVol(); });
+function basculerSon(){ const o = sortie(); o.muted = !o.muted; paintVol(); return o; }
+$('#pMute').addEventListener('click', basculerSon);
 $('#pVol').addEventListener('input', (ev) => {
   const o = sortie();
   o.volume = parseFloat(ev.target.value); o.muted = o.volume === 0;
@@ -599,12 +674,24 @@ function paintVol(){
 }
 
 const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2];
+function choisirVitesse(r){
+  V.playbackRate = r;
+  store.set('rate', r);
+  const txt = (r + '').replace('.',',') + '×';
+  $('#pRate').textContent = txt;
+  osd('Vitesse ' + txt);
+}
 $('#pRate').addEventListener('click', () => {
   const i = RATES.indexOf(V.playbackRate);
-  V.playbackRate = RATES[(i + 1) % RATES.length];
-  store.set('rate', V.playbackRate);
-  $('#pRate').textContent = (V.playbackRate + '').replace('.',',') + '×';
+  choisirVitesse(RATES[(i + 1) % RATES.length]);
 });
+/* < et >: un cran plus lent ou plus rapide, sans faire le tour */
+function vitesseDe(sens){
+  if (geste.rapide) return;
+  const r = V.playbackRate;
+  const n = sens > 0 ? RATES.find(x => x > r + 1e-6) : [...RATES].reverse().find(x => x < r - 1e-6);
+  if (n) choisirVitesse(n); else osd('Vitesse ' + (r + '').replace('.',',') + '×');
+}
 
 function skip(d){
   V.currentTime = Math.max(0, Math.min((V.duration || 0), V.currentTime + d));
@@ -903,7 +990,7 @@ $('#pIntro').addEventListener('click', (ev) => {
   m.hidden = !m.hidden;
   if (!m.hidden) buildIntroMenu();
 });
-const MENUS = ['#introMenu', '#audMenu', '#subMenu'];
+const MENUS = ['#introMenu', '#audMenu', '#subMenu', '#pAide'];
 function ouvrirMenu(id, remplir){
   return (ev) => {
     ev.stopPropagation();
@@ -990,10 +1077,14 @@ addEventListener('keydown', (ev) => {
   if (k === ' ' || k === 'k'){ ev.preventDefault(); V.paused ? V.play() : V.pause(); }
   else if (ev.key === 'ArrowRight'){ ev.preventDefault(); skip(ev.shiftKey ? 60 : 10); }
   else if (ev.key === 'ArrowLeft') { ev.preventDefault(); skip(ev.shiftKey ? -60 : -10); }
-  else if (ev.key === 'ArrowUp')   { ev.preventDefault(); const o = sortie(); o.volume = Math.min(1, o.volume + .08); o.muted = false; $('#pVol').value = o.volume; store.set('vol', o.volume); paintVol(); }
-  else if (ev.key === 'ArrowDown') { ev.preventDefault(); const o = sortie(); o.volume = Math.max(0, o.volume - .08); $('#pVol').value = o.volume; store.set('vol', o.volume); paintVol(); }
+  else if (ev.key === 'ArrowUp')   { ev.preventDefault(); const o = sortie(); o.volume = Math.min(1, o.volume + .08); o.muted = false; $('#pVol').value = o.volume; store.set('vol', o.volume); paintVol(); osd('Volume ' + Math.round(o.volume * 100) + ' %'); }
+  else if (ev.key === 'ArrowDown') { ev.preventDefault(); const o = sortie(); o.volume = Math.max(0, o.volume - .08); $('#pVol').value = o.volume; store.set('vol', o.volume); paintVol(); osd('Volume ' + Math.round(o.volume * 100) + ' %'); }
   else if (k === 'f'){ toggleFull(); }
-  else if (k === 'm'){ V.muted = !V.muted; paintVol(); }
+  // ce qui sonne, comme le bouton: avec une autre langue, couper la video ne coupait rien
+  else if (k === 'm'){ const o = basculerSon(); osd(o.muted ? 'Son coupé' : 'Son remis'); }
+  else if (ev.key === '<' || ev.key === '>'){ vitesseDe(ev.key === '>' ? 1 : -1); }
+  else if (k === 'c'){ basculerSousTitres(); }
+  else if (ev.key === '?'){ const m = $('#pAide'), ouvert = m.hidden; MENUS.forEach(x => { $(x).hidden = true; }); m.hidden = !ouvert; }
   else if (k === 'n'){ playNext(true); }
   else if (k === 'escape'){ if (document.fullscreenElement) document.exitFullscreen().catch(()=>{}); else closePlayer(); }
   else if (k >= '0' && k <= '9'){ if (V.duration) V.currentTime = V.duration * (parseInt(k,10) / 10); }

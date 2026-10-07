@@ -250,7 +250,7 @@ function renderHome(){
     sub: reco.perso ? 'd’après ce que tu regardes' : 'les mieux notées, en attendant de te connaître' });
 
   const favs = favList().filter(hasVideo);
-  if (favs.length) rows.push({ title:'Mes favoris', sub: fmtCount(favs.length,'série','séries'), items: favs, poster:true });
+  if (favs.length) rows.push({ title:'Ma liste', sub: fmtCount(favs.length,'série','séries'), items: favs, poster:true });
   const rec = recentList();
   if (rec.length) rows.push({ title:'Ajoutés récemment', items: rec, wide:true });
   rows.push(...categoryRows());

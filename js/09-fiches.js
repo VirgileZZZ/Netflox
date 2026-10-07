@@ -178,7 +178,7 @@ function posterHTML(a){
         (a.quality ? '<span class="tag q">' + esc(a.quality) + '</span>' : '') +
         (a.lang ? '<span class="tag lang">' + esc(a.lang) + '</span>' : '') +
         (a.subs ? '<span class="tag subs">' + esc(a.subs) + '</span>' : '') + '</div>' +
-      (isFav(a.key) ? '<span class="favmark" title="Favori">' + ICON_STAR_ON + '</span>' : '') +
+      (isFav(a.key) ? '<span class="favmark" title="Dans ma liste">' + ICON_STAR_ON + '</span>' : '') +
       noteMarkHTML(a) +
     '</div>' +
     '<div class="tbody"><div class="tname">' + esc(a.title) + '</div>' +
@@ -199,11 +199,9 @@ const ICON_STAR_ON = '<svg width="17" height="17" viewBox="0 0 24 24" fill="curr
 /** Bascule favori de la page d'une série. */
 function favButtonHTML(key){
   const on = isFav(key);
-  if (S.shared)                                  // le favori est celui de l’hôte
-    return on ? '<span class="btn btn-ghost fav on">' + ICON_STAR_ON + 'Favori de l’hôte</span>' : '';
   return '<button class="btn btn-ghost fav' + (on ? ' on' : '') + '" data-fav="' + esc(key) + '" ' +
     'aria-pressed="' + (on ? 'true' : 'false') + '">' + (on ? ICON_STAR_ON : ICON_STAR) +
-    (on ? 'Dans mes favoris' : 'Ajouter aux favoris') + '</button>';
+    (on ? 'Dans ma liste' : 'Ajouter à ma liste') + '</button>';
 }
 
 /* ------------------------------------------------------ les etoiles - */

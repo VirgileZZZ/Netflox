@@ -20,7 +20,7 @@ function adopterFiches(fiches){
   S.shared = true;
   const cats = {}, intro = {}, outro = {}, notes = {}, epNotes = {};
   const imdb = {}, epImdb = {}, descs = {}, titres = {}, spoils = {}, cadrages = {};
-  const favs = {};                               // jamais rempli: les favoris ne se partagent pas
+  const favs = {};                               // jamais rempli: chacun a sa liste (fav. dans 03-etat)
   for (const [key, d] of Object.entries(fiches || {})){
     if (!d || typeof d !== 'object') continue;
     if (Array.isArray(d.categories)){

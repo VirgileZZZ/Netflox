@@ -328,14 +328,54 @@ def construire_index():
     fichiers.sort(key=lambda f: f[0])
     global _videos_indexees
     _videos_indexees = {f[0] for f in fichiers if f[0].rsplit(".", 1)[-1].lower() in VIDEO_EXT}
-    data = {"version": 1, "base": nom + "/", "genere": int(time.time() * 1000),
-            "partage": True, "fiches": accompagnements, "files": fichiers}
+    fichiers, suites = compacter_pages(fichiers)
+    data = {"version": 2, "base": nom + "/", "genere": int(time.time() * 1000),
+            "partage": True, "fiches": accompagnements, "files": fichiers, "suites": suites}
     cible = os.path.join(RACINE, MANIFESTE)
+    # rien n'a bouge: le fichier reste tel quel, et avec lui l'empreinte que
+    # les navigateurs gardent — ils ne retelechargent pas l'index pour rien
+    try:
+        with open(cible, encoding="utf-8") as f:
+            ancien = json.load(f)
+        ancien["genere"] = data["genere"]
+        if ancien == data:
+            return cible, len(fichiers) + sum(s[2] for s in suites)
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
     tmp = cible + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
     os.replace(tmp, cible)
-    return cible, len(fichiers)
+    return cible, len(fichiers) + sum(s[2] for s in suites)
+
+
+def compacter_pages(fichiers):
+    """Les pages de scans font 96 % de l'index, presque toutes nommees 1.jpg,
+    2.jpg ... N.jpg dans leur chapitre. Un chapitre ainsi numerote tient en une
+    ligne [dossier, extension, N] que la page redeplie: l'index passe d'1 Mo a
+    moins de 100 Ko a travers le tunnel. Taille et date d'une page ne servent
+    a rien a la page; un chapitre numerote autrement reste ligne a ligne."""
+    par_dossier = {}
+    for i, f in enumerate(fichiers):
+        rel = f[0]
+        if rel.count("/") < 2:                      # sous un dossier de la serie
+            continue
+        dossier, nom = rel.rsplit("/", 1)
+        base, _, ext = nom.rpartition(".")
+        if ext.lower() not in IMAGE_EXT or not base.isdigit():
+            continue
+        par_dossier.setdefault(dossier, []).append((i, base, ext))
+    retirer, suites = set(), []
+    for dossier, pages in par_dossier.items():
+        n = len(pages)
+        if n < 3 or len({e for _, _, e in pages}) != 1:
+            continue
+        if {b for _, b, _ in pages} != {str(k) for k in range(1, n + 1)}:
+            continue
+        suites.append([dossier, pages[0][2], n])
+        retirer.update(i for i, _, _ in pages)
+    suites.sort()
+    return [f for i, f in enumerate(fichiers) if i not in retirer], suites
 
 
 # ----------------------------------------------------------- les notes -----
@@ -623,7 +663,7 @@ def fusionner_donnees(serveur, recu):
             if v is not None:
                 out[k] = v
             continue
-        if re.match(r"(pg|rd|sc)\.", k) and isinstance(v, dict) and isinstance(ici, dict):
+        if re.match(r"(pg|rd|sc|fav)\.", k) and isinstance(v, dict) and isinstance(ici, dict):
             if (v.get("at") or 0) >= (ici.get("at") or 0):
                 out[k] = v
         elif k.startswith("oubli.") and isinstance(v, (int, float)) and isinstance(ici, (int, float)):
@@ -1002,20 +1042,30 @@ def affiche_reduite(chemin, largeur):
             return None
 
 
-_index_gz = {"cle": None, "corps": None}
+_index_gz = {"cle": None, "corps": None, "etag": None}
 def _index_compresse():
-    """L'index compresse, garde tant que le fichier n'a pas bouge."""
+    """L'index compresse et son empreinte, gardes tant que le fichier n'a pas
+    bouge. L'empreinte vient du contenu: le navigateur qui l'a deja recoit un
+    « rien n'a change » de quelques octets au lieu de tout l'index."""
     chemin = os.path.join(RACINE, MANIFESTE)
     try:
         st = os.stat(chemin)
     except OSError:
-        return None
+        return None, None
     cle = (st.st_mtime_ns, st.st_size)
     if _index_gz["cle"] != cle:
         with open(chemin, "rb") as f:
-            _index_gz["corps"] = gzip.compress(f.read(), compresslevel=6)
+            brut = f.read()
+        _index_gz["corps"] = gzip.compress(brut, compresslevel=6, mtime=0)
+        _index_gz["etag"] = '"%s"' % hashlib.sha1(brut).hexdigest()[:20]
         _index_gz["cle"] = cle
-    return _index_gz["corps"]
+    return _index_gz["corps"], _index_gz["etag"]
+
+# Combien de temps le navigateur garde un media sans redemander. Une page de
+# scan ne change jamais: une semaine. Une affiche peut etre remplacee sous le
+# meme nom: un jour. Le reste (videos, sous-titres, page, code) se revalide.
+CACHE_PAGE_SCAN = 7 * 86400
+CACHE_IMAGE = 86400
 
 
 # -------------------------------------------------------------- serveur ----
@@ -1041,7 +1091,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # dans une video: il la telecharge en entier ou rien.
         self.send_header("Accept-Ranges", "bytes")
         # une affiche reduite ne change pas (son nom suit l'original): gardee un jour
-        self.send_header("Cache-Control", "max-age=86400" if getattr(self, "_garder", False) else "no-cache")
+        # la connexion sert plusieurs fichiers d'affilee: la duree ne vaut que pour celui-ci
+        garder, self._garder = getattr(self, "_garder", None), None
+        self.send_header("Cache-Control", "max-age=%d" % garder if garder else "no-cache")
         super().end_headers()
 
     def autorise(self):
@@ -1210,19 +1262,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
             self.send_error(404)
             return None
-        if urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).lstrip("/") == MANIFESTE:
+        self._garder = None
+        rel = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).lstrip("/")
+        if rel == MANIFESTE:
             rafraichir_fiches()
             # l'index pese plusieurs Mo de texte: compresse, il en fait dix fois moins
             if "gzip" in (self.headers.get("Accept-Encoding") or "") and not self.headers.get("Range"):
-                corps = _index_compresse()
+                corps, etag = _index_compresse()
                 if corps is not None:
+                    deja = self.headers.get("If-None-Match") or ""
+                    if etag in (t.strip() for t in deja.split(",")):
+                        self.send_response(304)
+                        self.send_header("ETag", etag)
+                        self.send_header("Vary", "Accept-Encoding")
+                        self.end_headers()
+                        return None
                     self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
                     self.send_header("Content-Encoding", "gzip")
                     self.send_header("Content-Length", str(len(corps)))
+                    self.send_header("ETag", etag)
                     self.send_header("Vary", "Accept-Encoding")
                     self.end_headers()
                     return io.BytesIO(corps)
+        elif rel.rsplit(".", 1)[-1].lower() in IMAGE_EXT and os.path.isfile(self.translate_path(self.path)):
+            # videos/serie/scan/chapitre/1.jpg: une page de scan, sinon une affiche
+            self._garder = CACHE_PAGE_SCAN if rel.count("/") >= 4 else CACHE_IMAGE
 
 
         # une affiche demandee en petit: la copie reduite, si elle vaut le coup
@@ -1239,7 +1304,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     except OSError:
                         f = None
                     if f:
-                        self._garder = True
+                        self._garder = CACHE_IMAGE
                         self.send_response(200)
                         self.send_header("Content-Type", "image/jpeg")
                         self.send_header("Content-Length", str(os.path.getsize(reduite)))
