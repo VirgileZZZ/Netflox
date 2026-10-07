@@ -632,6 +632,17 @@ def fusionner_donnees(serveur, recu):
             out[k] = dict(ici, **v)
         else:
             out[k] = v
+    # une serie retiree de « Reprendre »: ses positions d'avant l'oubli partent.
+    # L'appareil qui l'a retiree ne les envoie plus, mais le compte les gardait
+    # et les rendait au prochain chargement.
+    for k in list(out):
+        m = re.match(r"(pg|rd|sc)\.(.+)", k)
+        if not m or not isinstance(out[k], dict):
+            continue
+        serie = m.group(2).split("|" if m.group(1) == "sc" else "/")[0]
+        oubli = out.get("oubli." + serie)
+        if isinstance(oubli, (int, float)) and (out[k].get("at") or 0) <= oubli:
+            del out[k]
     return out
 
 

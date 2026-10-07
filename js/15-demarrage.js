@@ -11,11 +11,16 @@
 "use strict";
 /* ======================================================= démarrage == */
 (async function boot(){
-  reparerRenommages();
-  // 1. dossiers voisins (videos/, video/, .) — sans rien demander
-  if (await autoDetect()) return;
-  // 2. dossier déjà autorisé lors d'une session précédente
-  if (await restoreFolder()) return;
+  try {
+    reparerRenommages();
+    // 1. dossiers voisins (videos/, video/, .) — sans rien demander
+    if (await autoDetect()) return;
+    // 2. dossier déjà autorisé lors d'une session précédente
+    if (await restoreFolder()) return;
+  } finally {
+    // l'ecran de chargement s'en va: la bibliotheque est la, ou l'accueil prend le relais
+    document.documentElement.classList.remove('demarrage');
+  }
   // 3. sinon seulement, on demande
   const note = $('#fsNote');
   const bits = [];

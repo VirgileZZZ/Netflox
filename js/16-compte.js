@@ -76,8 +76,16 @@ addEventListener('pagehide', () => compteSauver(true));
 function compteFusionner(d){
   compteSilence = true;
   try {
+    // les oublis d'abord: une position que la croix de « Reprendre » a
+    // retiree ici, le compte la gardait et la rendait au chargement suivant
+    for (const [k, v] of Object.entries(d || {}))
+      if (k.startsWith('oubli.') && typeof v === 'number' && v > +store.get(k, 0)) store.set(k, v);
     for (const [k, v] of Object.entries(d || {})){
       if (!cleDuCompte(k) || v == null) continue;
+      if (/^(pg|rd|sc)\./.test(k)){
+        const serie = k.slice(3).split(k[0] === 's' ? '|' : '/')[0];
+        if ((+v.at || 0) <= +store.get('oubli.' + serie, 0)) continue;
+      }
       const ici = store.get(k, null);
       if (ici == null) store.set(k, v);
       else if (/^(pg|rd|sc)\./.test(k)){ if ((+v.at || 0) > (+ici.at || 0)) store.set(k, v); }

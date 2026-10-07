@@ -205,6 +205,26 @@ function choixDuJour(liste){
   for (const ch of jour) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return liste[h % n];
 }
+/* La serie qu'on est en train de regarder: la plus recemment touchee qui
+   n'est pas finie, depuis moins d'un mois. L'episode a reprendre: celui
+   qu'on a laisse en cours, ou, s'il etait fini, le suivant pas encore vu. */
+const EN_COURS_JOURS = 30;
+function serieEnCours(){
+  const limite = Date.now() - EN_COURS_JOURS * 86400000, l = [];
+  for (const a of videoSeries()){
+    let dernier = null, at = 0;
+    for (const e of a.episodes){ const p = getProgress(e); if (p && p.at > at){ at = p.at; dernier = e; } }
+    if (dernier && at > limite) l.push({ a, dernier, at });
+  }
+  l.sort((x, y) => y.at - x.at);
+  for (const { a, dernier } of l){
+    const ep = getProgress(dernier).done
+      ? a.episodes.find(e => e.idx > dernier.idx && !(getProgress(e) || {}).done)
+      : dernier;
+    if (ep) return { a, ep };
+  }
+  return null;
+}
 function phraseReco(r){
   if (!r.raisons.length) return '';
   return 'Parce que tu aimes ' + r.raisons.join(' et ');
@@ -216,9 +236,12 @@ function renderHome(){
   const cont = continueList();
   const vids  = videoSeries();
   const reco = recommandations();
+  // une serie en cours passe avant la recommandation du jour: on la reprend
+  const enCours = serieEnCours();
   const une = choixDuJour(reco.liste);
-  const heroA = (une && une.a) || favList().find(hasVideo) || vids[0];
-  renderHero(heroA, null, !une ? '' : reco.perso ? phraseReco(une) || 'À la une sur Netflox' : 'Les mieux notées de Netflox');
+  if (enCours) renderHero(enCours.a, enCours.ep);
+  else renderHero((une && une.a) || favList().find(hasVideo) || vids[0], null,
+                  !une ? '' : reco.perso ? phraseReco(une) || 'À la une sur Netflox' : 'Les mieux notées de Netflox');
 
 
   const rows = [];
