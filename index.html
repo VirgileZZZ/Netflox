@@ -892,10 +892,17 @@ img[data-art]{object-position:var(--ax,50%) 50%}
 /* cliquable seulement quand l'oeuvre a une fiche a ouvrir */
 .ed-name .ed-oeuvre[data-anime]{cursor:pointer}
 .ed-name .ed-oeuvre[data-anime]:hover{color:var(--accent2)}
-/* l'episode que montre l'edit, sous l'oeuvre: il mene a la page de l'episode */
-.ed-name .ed-ep{display:block;max-width:100%;text-align:left;font-size:.8rem;font-weight:700;color:#ff8fb5;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;margin-top:1px}
-.ed-name .ed-ep:hover{text-decoration:underline}
+/* l'episode que montre l'edit, sous l'oeuvre: il mene a la page de l'episode.
+   Une ligne de 19 px collee au titre: un clic un peu haut ouvrait la fiche,
+   un peu bas ne faisait rien. La zone de clic deborde donc de la ligne (les
+   marges negatives rendent la place: rien ne bouge a l'ecran), et le doigt
+   voit que c'est pris. */
+.ed-name .ed-ep{display:block;max-width:calc(100% + 10px);text-align:left;font-size:.8rem;font-weight:700;color:#ff8fb5;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;
+  padding:5px 10px 9px 6px;margin:-4px 0 -9px -6px;border-radius:8px;position:relative;z-index:1;
+  touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:background .15s}
+.ed-name .ed-ep:hover{text-decoration:underline;background:rgba(255,143,181,.1)}
+.ed-name .ed-ep:active{background:rgba(255,143,181,.22)}
 /* la page d'un episode */
 .epage{display:grid;gap:18px;padding-bottom:30px}
 .epage-haut{display:flex;gap:22px;align-items:flex-end;flex-wrap:wrap}
@@ -1392,24 +1399,24 @@ img[data-art]{object-position:var(--ax,50%) 50%}
      pas charger de module, le navigateur y voit une requete inter-origines
      et la refuse. Ils partagent donc la meme portee globale, comme lorsque
      tout tenait dans une seule balise — et l'ordre ci-dessous compte. -->
-<script src="js/01-outils.js?v=20261007g"></script>
-<script src="js/02-algo-edits.js?v=20261007g"></script>
-<script src="js/03-etat.js?v=20261007g"></script>
-<script src="js/04-dossier.js?v=20261007g"></script>
-<script src="js/05-scan.js?v=20261007g"></script>
-<script src="js/06-accompagnement.js?v=20261007g"></script>
-<script src="js/07-rendu.js?v=20261007g"></script>
-<script src="js/08-partage.js?v=20261007g"></script>
-<script src="js/09-fiches.js?v=20261007g"></script>
-<script src="js/10-vignettes.js?v=20261007g"></script>
-<script src="js/11-documents.js?v=20261007g"></script>
-<script src="js/12-lecteur-scans.js?v=20261007g"></script>
-<script src="js/13-fil-edits.js?v=20261007g"></script>
-<script src="js/14-lecteur.js?v=20261007g"></script>
-<script src="js/15-demarrage.js?v=20261007g"></script>
-<script src="js/16-compte.js?v=20261007g"></script>
-<script src="js/17-reglages.js?v=20261007g"></script>
-<script src="js/18-retour.js?v=20261007g"></script>
+<script src="js/01-outils.js?v=20261007h"></script>
+<script src="js/02-algo-edits.js?v=20261007h"></script>
+<script src="js/03-etat.js?v=20261007h"></script>
+<script src="js/04-dossier.js?v=20261007h"></script>
+<script src="js/05-scan.js?v=20261007h"></script>
+<script src="js/06-accompagnement.js?v=20261007h"></script>
+<script src="js/07-rendu.js?v=20261007h"></script>
+<script src="js/08-partage.js?v=20261007h"></script>
+<script src="js/09-fiches.js?v=20261007h"></script>
+<script src="js/10-vignettes.js?v=20261007h"></script>
+<script src="js/11-documents.js?v=20261007h"></script>
+<script src="js/12-lecteur-scans.js?v=20261007h"></script>
+<script src="js/13-fil-edits.js?v=20261007h"></script>
+<script src="js/14-lecteur.js?v=20261007h"></script>
+<script src="js/15-demarrage.js?v=20261007h"></script>
+<script src="js/16-compte.js?v=20261007h"></script>
+<script src="js/17-reglages.js?v=20261007h"></script>
+<script src="js/18-retour.js?v=20261007h"></script>
 
 <script>
 /* L'application installable (icone sur l'ecran d'accueil, plein ecran): seulement
