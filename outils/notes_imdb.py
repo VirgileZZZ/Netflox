@@ -489,6 +489,24 @@ def appliquer(videos, series, plan, notes, titres, log, bavard=False):
     return a, r, t, sans
 
 
+def nouveaux_episodes(videos, series, plan, notes):
+    """Les tconst des episodes presents, notes sur IMDb, et pas encore dans
+    leur bibliotheque.json: ceux qu'on vient d'ajouter."""
+    out = []
+    for dossier, fiche in series.items():
+        chemin = os.path.join(videos, dossier)
+        grille = plan.get(fiche["tconst"], {})
+        if not grille or not os.path.isdir(chemin):
+            continue
+        stock = (lire_json(os.path.join(chemin, ACCOMPAGNEMENT), {}) or {}).get("notes_episodes_imdb") or {}
+        for rel in episodes_locaux(chemin):
+            se = saison_episode(rel)
+            tc = grille.get("%d.%d" % se) if se else None
+            if tc and rel not in stock and note_de(notes, tc) is not None:
+                out.append(tc)
+    return out
+
+
 def charger_titres(chemin, voulus):
     out = {}
     with gzip.open(chemin, "rt", encoding="utf-8") as f:
@@ -530,16 +548,28 @@ def maj(complet=False, log=print):
                 del series[d]
             ecrire_json(fichier_series, series)
 
-    # En mode complet on rassemble d'abord les fiches possibles des dossiers
-    # inconnus: leurs episodes doivent entrer dans le plan pour qu'on puisse
-    # les confronter aux notes deja inscrites.
-    manquantes, lots = {}, {}
-    if complet:
-        manquantes = a_identifier(videos, series)
-        if manquantes:
-            chemin_noms = telecharger(NOMS, log)
-            if chemin_noms:
-                lots = candidats_series(chemin_noms, manquantes, notes)
+    # On rassemble d'abord les fiches possibles des dossiers inconnus: leurs
+    # episodes doivent entrer dans le plan pour qu'on puisse les confronter aux
+    # notes deja inscrites. Avant, seul --complet le faisait — une serie
+    # ajoutee restait sans note a chaque lancement, sous un « deja a jour ».
+    # Un dossier deja essaye sans succes n'est retente que s'il a change
+    # (episodes en plus) ou au bout d'une semaine: la table des noms pese
+    # 220 Mo, pas question de la reprendre a chaque lancement pour rien.
+    fichier_essais = os.path.join(CACHE, "essais.json")
+    essais = lire_json(fichier_essais, {})
+    lots = {}
+    manquantes = a_identifier(videos, series)
+    if not complet:
+        for d in list(manquantes):
+            e = essais.get(d)
+            if e and e.get("eps") == len(episodes_locaux(os.path.join(videos, d))) \
+                    and time.time() - e.get("vu", 0) < 7 * 86400:
+                del manquantes[d]
+    if manquantes:
+        log("nouvelle(s) serie(s) : %s" % ", ".join(sorted(manquantes)))
+        chemin_noms = telecharger(NOMS, log)
+        if chemin_noms:
+            lots = candidats_series(chemin_noms, manquantes, notes)
 
     if not series and not lots:
         log("aucune serie identifiee — lance une fois "
@@ -590,6 +620,12 @@ def maj(complet=False, log=print):
     if lots:
         if trancher(manquantes, lots, series, plan, notes, videos, log):
             ecrire_json(fichier_series, series)
+        for d in manquantes:
+            if d in series:
+                essais.pop(d, None)
+            else:
+                essais[d] = {"eps": len(episodes_locaux(os.path.join(videos, d))), "vu": time.time()}
+        ecrire_json(fichier_essais, essais)
         # le plan a servi a departager: on n'en garde que les series retenues
         gardes = {f["tconst"] for f in series.values()}
         plan = {k: v for k, v in plan.items() if k in gardes}
@@ -606,15 +642,23 @@ def maj(complet=False, log=print):
                 neufs[fiche["tconst"]] = hors
         ecrire_json(fichier_absents, neufs)
 
+    # Les titres: tous en mode complet; sinon ceux des episodes qui n'ont pas
+    # encore de note — les nouveaux. Avant, un episode ajoute recevait sa note
+    # mais jamais son titre. Une fois note il sort du lot: pas de seconde fois.
     titres = {}
     if complet:
+        voulus = {tc for g in plan.values() for tc in g.values()}
+    else:
+        voulus = set(nouveaux_episodes(videos, series, plan, notes))
+    noms_pris = False
+    if voulus:
         chemin_noms = telecharger(NOMS, log)
         if chemin_noms:
-            voulus = {tc for g in plan.values() for tc in g.values()}
+            noms_pris = True
             titres = charger_titres(chemin_noms, voulus)
 
     res = appliquer(videos, series, plan, notes, titres, log, bavard=complet)
-    if complet:
+    if complet or noms_pris or lots:
         # 220 Mo qui ne resservent qu'a la prochaine serie inconnue: on les rend
         try:
             os.remove(os.path.join(CACHE, NOMS))

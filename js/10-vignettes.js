@@ -34,7 +34,9 @@ function artTag(a, grand){
   // deja chargee en entier une fois: directement la vraie
   const src = affichesPleines.has(url) ? url : mini;
   // paresseuses: 134 affiches d'un coup pesaient 34 Mo au premier affichage sur telephone
+  const x = cadrageOf(a.key);
   return '<img data-art="' + esc(a.key) + '" data-mini="' + taille + '" alt="" loading="lazy" decoding="async"' +
+    (x != null ? ' style="--ax:' + x + '%"' : '') +
     (ready ? ' src="' + esc(src) + '" class="in" data-done="1"' + (src !== url ? ' data-pleine="' + esc(url) + '"' : '') : '') + '>';
 }
 /* D'abord la copie legere (le premier affichage arrive vite), puis la vraie

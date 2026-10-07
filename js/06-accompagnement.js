@@ -51,6 +51,7 @@ async function readSidecars(){
     for (const [rel, v] of Object.entries(data.notes_episodes_imdb || {}))
       if (typeof v === 'number') setEpImdb(a.key + '/' + rel, v);
     if (typeof data.description === 'string') setDesc(a.key, data.description);
+    if (typeof data.affiche_x === 'number') setCadrage(a.key, data.affiche_x);
     for (const [rel, t] of Object.entries(data.titres_episodes || {}))
       if (typeof t === 'string') setEpTitre(a.key + '/' + rel, titreUtile(t));
     if (data.spoil_edits && typeof data.spoil_edits === 'object') setSpoilsSerie(a.key, data.spoil_edits);
@@ -169,6 +170,7 @@ function sidecarData(a){
   }
   const data = { version: 1, serie: a.key, categories: catsOf(a.key) };
   if (descOf(a.key)) data.description = descOf(a.key);
+  if (cadrageOf(a.key) != null) data.affiche_x = cadrageOf(a.key);
   if (noteOf(a.key)) data.note = noteOf(a.key);
   if (imdbOf(a.key)) data.note_imdb = imdbOf(a.key);
   if (Object.keys(notesEp).length) data.notes_episodes = notesEp;
@@ -186,7 +188,7 @@ function sidecarEmpty(d){
   return !d.categories.length && !Object.keys(d.generiques).length &&
          !d.generiques_fin && !d.favori && !d.progression &&
          !d.note && !d.notes_episodes && !d.note_imdb &&
-         !d.notes_episodes_imdb && !d.description && !d.titres_episodes &&
+         !d.notes_episodes_imdb && !d.description && !d.titres_episodes && d.affiche_x == null &&
          !d.spoil_edits;
 
 }

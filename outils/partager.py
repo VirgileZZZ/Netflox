@@ -134,6 +134,9 @@ def lire_accompagnement(chemin):
     texte = d.get("description")
     if isinstance(texte, str) and texte.strip():
         fiche["description"] = texte.strip()[:1200]
+    x = d.get("affiche_x")                       # le cadrage de l'affiche, 0-100
+    if isinstance(x, (int, float)) and not isinstance(x, bool) and 0 <= x <= 100:
+        fiche["affiche_x"] = round(x)
     for champ in ("note", "note_imdb"):
         note = _note(d.get(champ))
         if note:
@@ -283,30 +286,48 @@ def construire_index():
     else:
         return None, 0
 
+    # os.scandir plutot que os.walk + os.stat: sous Windows, la taille et la
+    # date viennent avec la liste du dossier. Plus de 80 000 miniatures: un
+    # appel systeme par fichier coutait 3 s, il en reste 0,25.
     fichiers = []
     accompagnements = {}
-    for dossier, sous, noms in os.walk(base):
-        sous[:] = [d for d in sous if d.lower() not in SAUTER]
-        if ACCOMPAGNEMENT in noms or NOTES_INVITES in noms:
-            serie = os.path.relpath(dossier, base).replace(os.sep, "/")
-            if "/" not in serie and serie != ".":   # un seul par serie, a sa racine
-                fiche = fiche_serie(dossier)
-                if fiche:
-                    accompagnements[serie] = fiche
-
-        for n in noms:
-            ext = n.rsplit(".", 1)[-1].lower() if "." in n else ""
-            chemin = os.path.join(dossier, n)
-            rel = os.path.relpath(chemin, base).replace(os.sep, "/")
-            if ext not in MEDIA_EXT and not est_cote(rel, ext):
-                continue
-            try:
-                st = os.stat(chemin)
-            except OSError:
-                continue
-            fichiers.append([rel, st.st_size, int(st.st_mtime * 1000)])
+    pile = [(base, "")]
+    while pile:
+        dossier, prefixe = pile.pop()
+        try:
+            it = os.scandir(dossier)
+        except OSError:
+            continue
+        a_fiche = False
+        with it:
+            for d in it:
+                n = d.name
+                try:
+                    if d.is_dir(follow_symlinks=False):
+                        if n.lower() not in SAUTER:
+                            pile.append((d.path, prefixe + n + "/"))
+                        continue
+                except OSError:
+                    continue
+                if n == ACCOMPAGNEMENT or n == NOTES_INVITES:
+                    a_fiche = True
+                ext = n.rsplit(".", 1)[-1].lower() if "." in n else ""
+                rel = prefixe + n
+                if ext not in MEDIA_EXT and not est_cote(rel, ext):
+                    continue
+                try:
+                    st = d.stat()
+                except OSError:
+                    continue
+                fichiers.append([rel, st.st_size, int(st.st_mtime * 1000)])
+        if a_fiche and prefixe.count("/") == 1:     # un seul par serie, a sa racine
+            fiche = fiche_serie(dossier)
+            if fiche:
+                accompagnements[prefixe[:-1]] = fiche
 
     fichiers.sort(key=lambda f: f[0])
+    global _videos_indexees
+    _videos_indexees = {f[0] for f in fichiers if f[0].rsplit(".", 1)[-1].lower() in VIDEO_EXT}
     data = {"version": 1, "base": nom + "/", "genere": int(time.time() * 1000),
             "partage": True, "fiches": accompagnements, "files": fichiers}
     cible = os.path.join(RACINE, MANIFESTE)
@@ -854,6 +875,19 @@ def _cookie(handler, valeur, age):
 REINDEX_DELAI = 180
 
 
+_videos_indexees = set()
+
+
+def noter_nouveaux_episodes():
+    """Passe notes_imdb sur la bibliotheque, sans rien afficher: la page
+    reprend les fiches a la prochaine demande de l'index."""
+    try:
+        import notes_imdb
+        notes_imdb.maj(log=lambda m: None)
+    except Exception:
+        pass
+
+
 def reindexer_en_continu():
     """Toutes les 3 minutes, l'index est refait: un episode ajoute pendant le
     partage apparait sans relancer (la page relit l'index quand on revient
@@ -863,8 +897,13 @@ def reindexer_en_continu():
         time.sleep(REINDEX_DELAI)
         for essai in range(5):
             try:
+                avant = set(_videos_indexees)
                 with _verrou_index:
                     construire_index()
+                # des episodes en plus: leurs notes et titres IMDb tout de suite,
+                # plutot qu'au prochain lancement du partage
+                if avant and _videos_indexees - avant:
+                    noter_nouveaux_episodes()
                 break
             except PermissionError:
                 time.sleep(2)

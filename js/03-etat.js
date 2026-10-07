@@ -228,6 +228,23 @@ function setEpImdb(rel, n){
   store.set('epimdb', all);
   saveSidecar(String(rel).split('/')[0]);
 }
+/* Le cadrage horizontal de l'affiche, de 0 (bord gauche) a 100 (bord droit):
+   une carte verticale ne garde qu'une bande d'un fond d'ecran 16:9. */
+function cadrageMap(){
+  if (S.shared) return S.host.cadrages || {};
+  return store.get('cadrages', {}) || {};
+}
+function cadrageOf(key){
+  const x = cadrageMap()[key];
+  return typeof x === 'number' && x >= 0 && x <= 100 ? Math.round(x) : null;
+}
+function setCadrage(key, x){
+  if (lectureSeule()) return;
+  const all = store.get('cadrages', {}) || {};
+  if (typeof x === 'number' && x >= 0 && x <= 100) all[key] = Math.round(x); else delete all[key];
+  store.set('cadrages', all);
+  saveSidecar(key);
+}
 function setDesc(key, texte){
   if (lectureSeule()) return;
   const all = descMap();

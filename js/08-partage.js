@@ -19,7 +19,7 @@
 function adopterFiches(fiches){
   S.shared = true;
   const cats = {}, intro = {}, outro = {}, notes = {}, epNotes = {};
-  const imdb = {}, epImdb = {}, descs = {}, titres = {}, spoils = {};
+  const imdb = {}, epImdb = {}, descs = {}, titres = {}, spoils = {}, cadrages = {};
   const favs = {};                               // jamais rempli: les favoris ne se partagent pas
   for (const [key, d] of Object.entries(fiches || {})){
     if (!d || typeof d !== 'object') continue;
@@ -34,6 +34,7 @@ function adopterFiches(fiches){
     for (const [rel, v] of Object.entries(d.notes_episodes_imdb || {}))
       if (typeof v === 'number') epImdb[key + '/' + rel] = v;
     if (typeof d.description === 'string') descs[key] = d.description;
+    if (typeof d.affiche_x === 'number') cadrages[key] = d.affiche_x;
     for (const [rel, t] of Object.entries(d.titres_episodes || {}))
       if (titreUtile(t)) titres[key + '/' + rel] = titreUtile(t);
     adopterInvites(key, d.notes_invites);
@@ -47,7 +48,7 @@ function adopterFiches(fiches){
       }
     }
   }
-  S.host = { cats, favs, intro, outro, notes, epNotes, imdb, epImdb, descs, titres, spoils };
+  S.host = { cats, favs, intro, outro, notes, epNotes, imdb, epImdb, descs, titres, spoils, cadrages };
 
   /* Rien n'annonce le partage a l'ecran: le bandeau disait deux fois ce que
      l'invite constate de toute facon. Les droits, eux, ne changent pas —

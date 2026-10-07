@@ -223,7 +223,11 @@ main{padding-bottom:70px}
 main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusqu'au bas de l'ecran */
 .hero{position:relative;min-height:min(70vh,560px);display:flex;align-items:flex-end;padding:0 0 34px;margin-bottom:6px;isolation:isolate}
 .hero-bg{position:absolute;inset:0;z-index:-2;overflow:hidden;background:var(--bg2)}
-.hero-bg img{width:100%;height:100%;object-fit:cover;object-position:center 22%;filter:saturate(1.05)}
+/* le cadrage d'une affiche (affiche_x dans sa fiche): la plupart sont des fonds
+   d'ecran en 16:9, une carte verticale n'en garde qu'un tiers — le milieu par
+   defaut, qui tombait parfois entre deux personnages */
+img[data-art]{object-position:var(--ax,50%) 50%}
+.hero-bg img{width:100%;height:100%;object-fit:cover;object-position:var(--ax,50%) 22%;filter:saturate(1.05)}
 .hero-bg::after{
   content:'';position:absolute;inset:0;
   background:linear-gradient(to top,var(--bg) 2%,rgba(8,8,12,.82) 26%,rgba(8,8,12,.25) 62%,rgba(8,8,12,.55)),
@@ -341,7 +345,7 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
 /* ============================================================ detail ==== */
 .dhero{position:relative;padding:calc(var(--top) + 42px) clamp(20px,3.6vw,54px) 26px;isolation:isolate;overflow:hidden}
 .dhero-bg{position:absolute;inset:0;z-index:-2}
-.dhero-bg img{width:100%;height:100%;object-fit:cover;object-position:center 25%;filter:blur(2px) saturate(1.1);transform:scale(1.06)}
+.dhero-bg img{width:100%;height:100%;object-fit:cover;object-position:var(--ax,50%) 25%;filter:blur(2px) saturate(1.1);transform:scale(1.06)}
 .dhero-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(to top,var(--bg),rgba(8,8,12,.86) 45%,rgba(8,8,12,.6))}
 .dtop{display:flex;gap:26px;align-items:flex-end;flex-wrap:wrap}
 .dposter{position:relative;width:168px;aspect-ratio:2/3;border-radius:14px;overflow:hidden;flex:none;box-shadow:var(--sh);border:1px solid var(--line2);background:var(--card)}
@@ -1388,24 +1392,24 @@ main:has(> .welcome:not([hidden])){padding-bottom:0}   /* l'accueil descend jusq
      pas charger de module, le navigateur y voit une requete inter-origines
      et la refuse. Ils partagent donc la meme portee globale, comme lorsque
      tout tenait dans une seule balise — et l'ordre ci-dessous compte. -->
-<script src="js/01-outils.js?v=20261007e"></script>
-<script src="js/02-algo-edits.js?v=20261007e"></script>
-<script src="js/03-etat.js?v=20261007e"></script>
-<script src="js/04-dossier.js?v=20261007e"></script>
-<script src="js/05-scan.js?v=20261007e"></script>
-<script src="js/06-accompagnement.js?v=20261007e"></script>
-<script src="js/07-rendu.js?v=20261007e"></script>
-<script src="js/08-partage.js?v=20261007e"></script>
-<script src="js/09-fiches.js?v=20261007e"></script>
-<script src="js/10-vignettes.js?v=20261007e"></script>
-<script src="js/11-documents.js?v=20261007e"></script>
-<script src="js/12-lecteur-scans.js?v=20261007e"></script>
-<script src="js/13-fil-edits.js?v=20261007e"></script>
-<script src="js/14-lecteur.js?v=20261007e"></script>
-<script src="js/15-demarrage.js?v=20261007e"></script>
-<script src="js/16-compte.js?v=20261007e"></script>
-<script src="js/17-reglages.js?v=20261007e"></script>
-<script src="js/18-retour.js?v=20261007e"></script>
+<script src="js/01-outils.js?v=20261007f"></script>
+<script src="js/02-algo-edits.js?v=20261007f"></script>
+<script src="js/03-etat.js?v=20261007f"></script>
+<script src="js/04-dossier.js?v=20261007f"></script>
+<script src="js/05-scan.js?v=20261007f"></script>
+<script src="js/06-accompagnement.js?v=20261007f"></script>
+<script src="js/07-rendu.js?v=20261007f"></script>
+<script src="js/08-partage.js?v=20261007f"></script>
+<script src="js/09-fiches.js?v=20261007f"></script>
+<script src="js/10-vignettes.js?v=20261007f"></script>
+<script src="js/11-documents.js?v=20261007f"></script>
+<script src="js/12-lecteur-scans.js?v=20261007f"></script>
+<script src="js/13-fil-edits.js?v=20261007f"></script>
+<script src="js/14-lecteur.js?v=20261007f"></script>
+<script src="js/15-demarrage.js?v=20261007f"></script>
+<script src="js/16-compte.js?v=20261007f"></script>
+<script src="js/17-reglages.js?v=20261007f"></script>
+<script src="js/18-retour.js?v=20261007f"></script>
 
 <script>
 /* L'application installable (icone sur l'ecran d'accueil, plein ecran): seulement
