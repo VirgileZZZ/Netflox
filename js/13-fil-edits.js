@@ -621,7 +621,7 @@ function paintEdSpoil(caches){
  * melent a la suite seulement; masques, ils sont retires, sans rien remuer —
  * et si l'on etait sur l'un d'eux, on passe au suivant encore permis. */
 function edBasculerSpoils(){
-  if (!edCtx) return;
+  if (!edCtx || edCtx.episode) return;
   edSpoilsVisibles = !edSpoilsVisibles;
   const avant = edCtx.list, i = Math.max(0, edCtx.i), courant = avant[i];
   const tri = filtrerSpoils(edCtx.tous);
@@ -694,8 +694,12 @@ function openEditsEpisode(rel, depuisRel){
   const l = editsDeLEpisode(ep);
   if (!l.length) return toast('Aucun edit rangé sur cet épisode', 'bad');
   const a = S.byKey.get(ep.anime);
-  edSpoilsVisibles = false;
+  // un seul episode, choisi expres: ses edits sont tous montres, et le bouton
+  // des spoilers n'aurait rien a cacher ni a devoiler — il disparait
+  edSpoilsVisibles = true;
   edOuvrir(l, (a ? a.title + ' · ' : '') + nomCourtEpisode(ep), 0, depuisRel || null, false);
+  edCtx.episode = true;
+  $('#edSpoil').hidden = true;
 }
 
 function edOuvrir(edits, defaut, depart, garderRel, priorite){
@@ -706,6 +710,7 @@ function edOuvrir(edits, defaut, depart, garderRel, priorite){
   const file = fileEdits(tri.garder, edVus(), edContexte());
   if (priorite) file.list = prioriserDebloques(file.list, tri.place);
   edCtx = { list: file.list, i: -1, defaut, tous, priorite: !!priorite };
+  $('#edSpoil').hidden = false;
   ED.hidden = false;
   document.body.style.overflow = 'hidden';
   const garde = garderRel ? edCtx.list.findIndex(e => e.rel === garderRel) : -1;
