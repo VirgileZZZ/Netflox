@@ -851,11 +851,19 @@ function edFree(garde){
   }
 }
 function edPlay(i){
+  /* L'edit qu'on quitte se met en pause tout de suite, mais ne revient a son
+     debut qu'une fois sorti de l'ecran: le remettre a zero pendant le
+     defilement montrait, sur un telephone plus lent, une image « d'entre-deux »
+     de l'edit qui s'en allait avant d'arriver au suivant. */
   for (const [j] of edSrcs){
     if (j === i) continue;
     const v = edVideo(j);
-    if (v && !v.paused){ v.pause(); v.currentTime = 0; }
+    if (v && !v.paused){
+      v.pause();
+      setTimeout(() => { if (edCtx && edCtx.i !== j && v.isConnected && v.paused) v.currentTime = 0; }, 900);
+    }
   }
+
   const v = edVideo(i);
   if (!v || !v.getAttribute('src')) return;
   v.muted = edMuted() || edMuetForce;

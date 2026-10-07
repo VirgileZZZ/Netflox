@@ -413,7 +413,8 @@ function renderAnime(key){
   // saison ni liste d'episodes a montrer.
   const sansEp    = !a.seasonList.length;
   const seasonKey = sansEp ? null
-    : (S.seasonKey != null && a.seasons.has(S.seasonKey) ? S.seasonKey : a.seasonList[0].key);
+    : (S.seasonKey != null && a.seasons.has(S.seasonKey) ? S.seasonKey : saisonEnCours(a));
+
   const season    = sansEp ? null : a.seasons.get(seasonKey);
   const next = nextUnwatched(a);
   const initials = a.title.split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
@@ -914,7 +915,20 @@ function renderEpisode(rel){
       : '<div class="empty"><b>Aucun edit rangé sur cet épisode</b>Les edits se rangent par épisode dans annoter-edits.html.</div>');
 }
 
+/* La saison ouverte par defaut sur la fiche d'une serie: celle ou l'on en
+   est. Le dernier episode regarde, ou celui qui le suit s'il est fini; la
+   premiere saison si l'on n'a rien commence, ou si tout est vu. */
+function saisonEnCours(a){
+  let dernier = null, at = 0;
+  for (const e of a.episodes){ const p = getProgress(e); if (p && p.at > at){ at = p.at; dernier = e; } }
+  if (!dernier) return a.seasonList[0].key;
+  const p = getProgress(dernier);
+  const cible = p.done ? a.episodes.find(e => e.idx > dernier.idx && !(getProgress(e) || {}).done) : dernier;
+  return cible ? cible.seasonKey : a.seasonList[0].key;
+}
+
 function renderList(kind){
+
   const view = $('#view-list'); view.hidden = false;
 
   if (kind === 'search'){
