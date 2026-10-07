@@ -850,6 +850,108 @@ def _cookie(handler, valeur, age):
         COOKIE, valeur, age, "; Secure" if https else "")
 
 
+# ------------------------------------------------ l'index tenu a jour -----
+REINDEX_DELAI = 180
+
+
+def reindexer_en_continu():
+    """Toutes les 3 minutes, l'index est refait: un episode ajoute pendant le
+    partage apparait sans relancer (la page relit l'index quand on revient
+    sur l'onglet, ou au rechargement). Le fichier peut etre en cours d'envoi
+    a un invite — Windows refuse alors de le remplacer: on reessaie."""
+    while True:
+        time.sleep(REINDEX_DELAI)
+        for essai in range(5):
+            try:
+                with _verrou_index:
+                    construire_index()
+                break
+            except PermissionError:
+                time.sleep(2)
+            except Exception:
+                break
+
+
+# ------------------------------------------------ sauvegarde au lancement --
+SAUVEGARDES = "sauvegardes-auto"
+SAUVEGARDES_GARDEES = 15
+
+
+def sauvegarder_au_lancement():
+    """A chaque lancement, une copie des fiches de series, des notes des
+    invites et des comptes, dans sauvegardes-auto/<date>/. On garde les 15
+    dernieres. Quelques centaines de Ko a chaque fois: les videos n'y vont pas."""
+    racine = os.path.join(RACINE, SAUVEGARDES)
+    dest = os.path.join(racine, time.strftime("%Y-%m-%d_%H-%M-%S"))
+    base = _base_media()
+    n = 0
+    try:
+        if base:
+            for serie in os.listdir(base):
+                for nom in (ACCOMPAGNEMENT, NOTES_INVITES):
+                    src = os.path.join(base, serie, nom)
+                    if os.path.isfile(src):
+                        os.makedirs(os.path.join(dest, "videos", serie), exist_ok=True)
+                        shutil.copy2(src, os.path.join(dest, "videos", serie, nom))
+                        n += 1
+        comptes = _dossier_comptes()
+        if os.path.isdir(comptes):
+            for nom in os.listdir(comptes):
+                if nom.endswith(".json"):
+                    os.makedirs(os.path.join(dest, "comptes"), exist_ok=True)
+                    shutil.copy2(os.path.join(comptes, nom), os.path.join(dest, "comptes", nom))
+                    n += 1
+        anciennes = sorted(d for d in os.listdir(racine) if os.path.isdir(os.path.join(racine, d)))
+        for vieille in anciennes[:-SAUVEGARDES_GARDEES]:
+            shutil.rmtree(os.path.join(racine, vieille), ignore_errors=True)
+    except OSError:
+        pass
+    return n
+
+
+# --------------------------------------------------- affiches allegees -----
+"""Certaines jaquettes pesent 5 Mo pour 168 px affiches: en 4G, l'accueil
+mettait des dizaines de secondes. La page demande ?mini=400 (vignettes) ou
+?mini=1280 (grandes images de fond): le serveur en fait une fois une copie
+reduite en JPEG, rangee dans cache-affiches/, et la sert ensuite telle quelle.
+L'original n'est jamais touche."""
+CACHE_AFFICHES = "cache-affiches"
+_verrou_affiches = threading.Lock()
+
+
+def affiche_reduite(chemin, largeur):
+    """Le chemin de la copie reduite, ou None (pas de Pillow, image deja
+    petite, ou illisible: on servira l'original)."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        st = os.stat(chemin)
+    except OSError:
+        return None
+    cle = hashlib.sha256(("%s|%d|%d|%d" % (chemin, st.st_mtime_ns, st.st_size, largeur)).encode("utf-8")).hexdigest()[:24]
+    cible = os.path.join(RACINE, CACHE_AFFICHES, cle + ".jpg")
+    if os.path.isfile(cible):
+        return cible
+    with _verrou_affiches:
+        if os.path.isfile(cible):
+            return cible
+        try:
+            with Image.open(chemin) as im:
+                if im.width <= largeur and st.st_size < 400 * 1024:
+                    return None                  # deja legere: l'original fait l'affaire
+                im = im.convert("RGB")
+                im.thumbnail((largeur, largeur * 3))
+                os.makedirs(os.path.dirname(cible), exist_ok=True)
+                tmp = cible + ".%d.tmp" % threading.get_ident()
+                im.save(tmp, "JPEG", quality=82, optimize=True, progressive=True)
+                os.replace(tmp, cible)
+                return cible
+        except Exception:
+            return None
+
+
 _index_gz = {"cle": None, "corps": None}
 def _index_compresse():
     """L'index compresse, garde tant que le fichier n'a pas bouge."""
@@ -888,7 +990,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # Sans cette annonce, le navigateur ne tente meme pas de se deplacer
         # dans une video: il la telecharge en entier ou rien.
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Cache-Control", "no-cache")
+        # une affiche reduite ne change pas (son nom suit l'original): gardee un jour
+        self.send_header("Cache-Control", "max-age=86400" if getattr(self, "_garder", False) else "no-cache")
         super().end_headers()
 
     def autorise(self):
@@ -1071,6 +1174,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     self.end_headers()
                     return io.BytesIO(corps)
 
+
+        # une affiche demandee en petit: la copie reduite, si elle vaut le coup
+        morceaux = urllib.parse.urlsplit(self.path)
+        mini = urllib.parse.parse_qs(morceaux.query).get("mini", [""])[0]
+        if mini in ("400", "1280"):
+            chemin = self.translate_path(self.path)
+            ext = chemin.rsplit(".", 1)[-1].lower() if "." in chemin else ""
+            if ext in IMAGE_EXT and os.path.isfile(chemin):
+                reduite = affiche_reduite(chemin, int(mini))
+                if reduite:
+                    try:
+                        f = open(reduite, "rb")
+                    except OSError:
+                        f = None
+                    if f:
+                        self._garder = True
+                        self.send_response(200)
+                        self.send_header("Content-Type", "image/jpeg")
+                        self.send_header("Content-Length", str(os.path.getsize(reduite)))
+                        self.end_headers()
+                        return f
 
         plage = self.headers.get("Range")
         if not plage:
@@ -1341,10 +1465,14 @@ def main():
     print("  1/%d  Index des fichiers..." % total, end=" ", flush=True)
     debut = time.time()
     chemin, nb = construire_index()
+    threading.Thread(target=reindexer_en_continu, daemon=True).start()
+    sauves = sauvegarder_au_lancement()
     if chemin is None:
         print(couleur("aucun dossier videos/ trouve", "91"))
         return 1
     print(couleur("%d fichiers" % nb, "92") + " en %.1fs" % (time.time() - debut))
+    print("       " + couleur("%d fiches et comptes sauvegardes dans %s/" % (sauves, SAUVEGARDES), "90"))
+
 
     if mode == "local":
         return partage_local()

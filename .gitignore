@@ -130,3 +130,6 @@ comptes/
 # --- Icones de l application (les .png sont ignores plus haut) ---
 !icones/
 !icones/*.png
+
+# --- Copies reduites des affiches, refaites a la demande par le partage ---
+cache-affiches/

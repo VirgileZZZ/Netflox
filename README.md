@@ -25,6 +25,9 @@ Ceux qui l'ouvrent peuvent noter les épisodes et, s'ils le veulent, créer un c
 
 Sur téléphone, Netflox s'installe comme une application (« Ajouter à l'écran d'accueil »).
 
+Pendant le partage, un épisode ajouté dans `videos/` apparaît sans relancer (l'index est refait toutes les 3 minutes). À chaque lancement, les fiches des séries, les notes des invités et les comptes sont copiés dans `sauvegardes-auto/` (les 15 dernières sont gardées).
+
+
 
 ## Ranger les fichiers
 

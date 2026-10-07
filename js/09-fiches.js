@@ -123,7 +123,7 @@ function renderHero(a, resumeEp, kicker){
   const p  = ep ? getProgress(ep) : null;
   const label = p && p.t > 20 && !p.done ? 'Reprendre' : 'Lecture';
   $('#hero').innerHTML =
-    '<div class="hero-bg">' + artTag(a) + '</div>' +
+    '<div class="hero-bg">' + artTag(a, true) + '</div>' +
     '<div class="hero-in">' +
       '<div class="hero-kicker">' + esc(resumeEp ? 'On reprend ?' : kicker || 'À la une sur Netflox')
 
@@ -420,7 +420,7 @@ function renderAnime(key){
 
   view.innerHTML =
     '<div class="dhero">' +
-      '<div class="dhero-bg">' + artTag(a) + '</div>' +
+      '<div class="dhero-bg">' + artTag(a, true) + '</div>' +
       '<button class="backbtn" data-go="home">‹ Retour</button>' +
       '<div class="dtop">' +
         '<div class="dposter">' + (a.art ? artTag(a) :
@@ -547,7 +547,7 @@ function renderDocs(key){
   const initials = a.title.split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
   view.innerHTML =
     '<div class="dhero">' +
-      '<div class="dhero-bg">' + artTag(a) + '</div>' +
+      '<div class="dhero-bg">' + artTag(a, true) + '</div>' +
       // toute serie a desormais une fiche, y compris celle qui n'a que des
       // scans: le retour y remonte plutot qu'a l'index des lectures.
       '<button class="backbtn" data-anime="' + esc(a.key) + '">‹ ' + esc(a.title) + '</button>' +
@@ -728,13 +728,57 @@ function epHTML(e){
  * Taper « action » remonte donc la catégorie Action avec tout ce qu'elle contient.
  * Les épisodes ne sont pas cherchés: ils portent tous le même nom.
  */
+/* ------------------------------------------------ recherche tolerante
+ * Accents et majuscules ignores, fautes de frappe tolerees (une lettre sur un
+ * mot court, deux sur un long), debut de mot accepte (« shing »), et l'on
+ * cherche aussi dans les categories et la description: « attaque des titans »
+ * trouve Shingeki no Kyojin par les « Titans » de son resume. Le titre compte
+ * plus que la description; les resultats sont ranges par pertinence.
+ */
+const MOTS_VIDES = new Set(['de','des','du','la','le','les','l','d','un','une','et','a','au','aux','en',
+                            'the','of','an','and','in','on']);
+function normaliserTexte(t){
+  return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function distanceEdition(a, b, max){
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prec = Array.from({ length: b.length + 1 }, (_, k) => k);
+  for (let i = 1; i <= a.length; i++){
+    const cour = [i];
+    let mini = i;
+    for (let k = 1; k <= b.length; k++){
+      cour[k] = Math.min(prec[k] + 1, cour[k - 1] + 1, prec[k - 1] + (a[i - 1] === b[k - 1] ? 0 : 1));
+      if (cour[k] < mini) mini = cour[k];
+    }
+    if (mini > max) return max + 1;
+    prec = cour;
+  }
+  return prec[b.length];
+}
+/** Ce que vaut un mot cherche face aux mots d'un texte: 1 exact, moins si approche, 0 sinon. */
+function accordMot(jeton, mots){
+  let meilleur = 0;
+  const tol = jeton.length >= 7 ? 2 : jeton.length >= 4 ? 1 : 0;
+  for (const m of mots){
+    if (m === jeton) return 1;
+    if (jeton.length >= 3 && m.startsWith(jeton)) meilleur = Math.max(meilleur, .9);
+    else if (jeton.length >= 4 && m.includes(jeton)) meilleur = Math.max(meilleur, .7);
+    else if (tol && distanceEdition(jeton, m, tol) <= tol) meilleur = Math.max(meilleur, .75);
+  }
+  return meilleur;
+}
 function searchLibrary(q){
-  const query = String(q || '').trim().toLowerCase();
-  if (!query) return { cats: [], series: [] };
+  const brut = normaliserTexte(q);
+  if (!brut) return { cats: [], series: [] };
+  const jetons = brut.split(' ').filter(m => m && !MOTS_VIDES.has(m));
+  if (!jetons.length) jetons.push(...brut.split(' '));
+  const besoin = Math.ceil(jetons.length / 2);
 
   const byCat = new Map();
   for (const a of S.animes) for (const c of catsOf(a.key)){
-    if (!c.toLowerCase().includes(query)) continue;
+    const nc = normaliserTexte(c), mots = nc.split(' ');
+    if (!nc.includes(brut) && !jetons.every(j => accordMot(j, mots) >= .75)) continue;
     if (!byCat.has(c)) byCat.set(c, []);
     byCat.get(c).push(a);
   }
@@ -742,14 +786,24 @@ function searchLibrary(q){
     .map(([label, items]) => ({ label, items }))
     .sort((x,y) => y.items.length - x.items.length || naturalCompare(x.label, y.label));
 
-  const series = S.animes.filter(a =>
-    a.title.toLowerCase().includes(query) ||
-    a.key.toLowerCase().includes(query) ||
-    (a.lang && a.lang.toLowerCase().includes(query)) ||
-    (a.subs && a.subs.toLowerCase().includes(query)) ||
-    (a.quality && a.quality.toLowerCase().includes(query))
-  );
-  return { cats, series };
+  const trouves = [];
+  for (const a of S.animes){
+    const titre = normaliserTexte(a.title + ' ' + a.key);
+    const champs = [
+      [3, titre.split(' ')],
+      [1.5, normaliserTexte(catsOf(a.key).join(' ') + ' ' + [a.lang, a.subs, a.quality].filter(Boolean).join(' ')).split(' ')],
+      [1, normaliserTexte(descOf(a.key)).split(' ')]
+    ];
+    let score = titre.includes(brut) ? 10 : 0, accordes = 0;
+    for (const j of jetons){
+      let mieux = 0;
+      for (const [poids, mots] of champs) mieux = Math.max(mieux, poids * accordMot(j, mots));
+      if (mieux > 0){ accordes++; score += mieux; }
+    }
+    if (score >= 10 || accordes >= besoin) trouves.push({ a, score });
+  }
+  trouves.sort((x, y) => y.score - x.score || naturalCompare(x.a.title, y.a.title));
+  return { cats, series: trouves.map(t => t.a) };
 }
 
 /* ------------------------------------------------- filtres séries --- */

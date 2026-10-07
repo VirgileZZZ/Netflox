@@ -284,6 +284,8 @@ let hideT, saveT, nextT, nextCount = 0;
 async function openPlayer(ep){
   const a = S.byKey.get(ep.anime);
   S.current = ep;
+  majSessionMedia(ep);
+
   S.queue = a ? a.episodes : [ep];
   P.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -473,22 +475,103 @@ P.addEventListener('mousemove', poke);
    croix fermait le lecteur, « suivant » changeait d'episode. Et toucher
    l'image quand l'interface est cachee la montre, comme sur YouTube, au lieu
    de mettre en pause sans rien voir. */
-let toucherReveil = 0;
+/* Au doigt, sur l'image, les gestes d'une appli video:
+ *  - un tap: pause / lecture (ou, interface cachee, la faire revenir);
+ *  - un double-tap sur le tiers gauche ou droit: -10 / +10 s, et chaque tap
+ *    de plus dans la foulee ajoute 10 s, comme sur YouTube;
+ *  - un double-tap au centre: plein ecran.
+ * Un tap simple attend un quart de seconde, le temps de savoir s'il est double.
+ * A la souris rien ne change: clic = pause, double-clic = plein ecran. */
+let toucherReveil = 0, dernierType = 'mouse';
+let tapAttente = null, dernierTap = { t: 0, zone: null }, serieSaut = null;
 P.addEventListener('pointerdown', (ev) => {
-  if (ev.pointerType !== 'mouse' && P.classList.contains('hide-ui')) toucherReveil = Date.now();
+  dernierType = ev.pointerType || 'mouse';
+  if (dernierType !== 'mouse' && P.classList.contains('hide-ui')) toucherReveil = Date.now();
 }, true);
+function zoneTap(x){
+  const r = P.getBoundingClientRect();
+  return x < r.left + r.width / 3 ? -1 : x > r.right - r.width / 3 ? 1 : 0;
+}
 P.addEventListener('click', (ev) => {
-  if (Date.now() - toucherReveil < 700 && !ev.target.closest('.pcues')){
-    toucherReveil = 0;
-    ev.stopPropagation(); ev.preventDefault();
-    poke();
+  if (dernierType === 'mouse') return;
+  const cache = Date.now() - toucherReveil < 700;
+  const surImage = ev.target === V || ev.target === P;
+  if (!surImage){
+    // une commande cachee touchee a l'aveugle: on montre l'interface, sans l'activer
+    if (cache && !ev.target.closest('.pcues')){ toucherReveil = 0; ev.stopPropagation(); ev.preventDefault(); poke(); }
+    return;
   }
+  ev.stopPropagation(); ev.preventDefault();
+  const zone = zoneTap(ev.clientX), maintenant = Date.now();
+  if (zone && serieSaut && serieSaut.zone === zone && maintenant - serieSaut.t < 700){
+    serieSaut.t = maintenant; skip(zone * 10); return;
+  }
+  if (tapAttente && maintenant - dernierTap.t < 300 && zone === dernierTap.zone){
+    clearTimeout(tapAttente); tapAttente = null;
+    if (zone){ serieSaut = { zone, t: maintenant }; skip(zone * 10); } else toggleFull();
+    return;
+  }
+  dernierTap = { t: maintenant, zone };
+  toucherReveil = 0;
+  clearTimeout(tapAttente);
+  tapAttente = setTimeout(() => {
+    tapAttente = null;
+    if (cache) poke(); else { V.paused ? V.play() : V.pause(); poke(); }
+  }, 280);
 }, true);
 P.addEventListener('click', (ev) => {
   if (ev.target === V || ev.target === P){ V.paused ? V.play() : V.pause(); poke(); }
 });
 
-P.addEventListener('dblclick', (ev) => { if (ev.target === V || ev.target === P) toggleFull(); });
+P.addEventListener('dblclick', (ev) => {
+  if (dernierType !== 'mouse') return;          // au doigt, le double-tap est gere plus haut
+  if (ev.target === V || ev.target === P) toggleFull();
+});
+
+/* L'ecran ne s'eteint pas pendant qu'on regarde: un telephone se mettait en
+   veille au milieu d'un episode. Rendu a la pause, repris au retour. */
+let verrouEcran = null;
+async function garderEcranAllume(){
+  if (!('wakeLock' in navigator) || verrouEcran || V.paused || P.hidden || document.hidden) return;
+  try {
+    verrouEcran = await navigator.wakeLock.request('screen');
+    verrouEcran.addEventListener('release', () => { verrouEcran = null; });
+  } catch(e){ verrouEcran = null; }
+}
+function relacherEcran(){ if (verrouEcran){ verrouEcran.release().catch(() => {}); verrouEcran = null; } }
+V.addEventListener('play', garderEcranAllume);
+V.addEventListener('pause', relacherEcran);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) garderEcranAllume(); });
+
+/* L'ecran verrouille, les notifications, les touches media du clavier et des
+   ecouteurs: le titre de l'episode, sa jaquette, et les boutons lecture,
+   -10 / +10 s, suivant. */
+function majSessionMedia(ep){
+  if (!('mediaSession' in navigator) || !ep) return;
+  const a = S.byKey.get(ep.anime);
+  const jaquette = a && a.art && artUrls.get(a.art.rel);
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: titreEpisode(ep), artist: a ? a.title : '', album: seasonLabel(ep.seasonKey) || 'Netflox',
+      artwork: jaquette && !/^blob:/.test(jaquette)
+        ? [{ src: new URL(jaquette, location.href).href, sizes: '512x512' }]
+        : [{ src: new URL('icones/netflox-512.png', location.href).href, sizes: '512x512', type: 'image/png' }]
+    });
+  } catch(e){}
+}
+if ('mediaSession' in navigator){
+  const ms = navigator.mediaSession;
+  [['play', () => V.play()], ['pause', () => V.pause()],
+   ['seekbackward', (d) => skip(-((d && d.seekOffset) || 10))], ['seekforward', (d) => skip((d && d.seekOffset) || 10)],
+   ['seekto', (d) => { if (d && isFinite(d.seekTime)) V.currentTime = d.seekTime; }],
+   ['nexttrack', () => playNext(true)]].forEach(([k, f]) => { try { ms.setActionHandler(k, f); } catch(e){} });
+  let positionT = 0;
+  V.addEventListener('timeupdate', () => {
+    if (Date.now() - positionT < 5000 || !isFinite(V.duration) || !V.duration) return;
+    positionT = Date.now();
+    try { ms.setPositionState({ duration: V.duration, playbackRate: V.playbackRate || 1, position: Math.min(V.currentTime, V.duration) }); } catch(e){}
+  });
+}
 $('#pClose').addEventListener('click', closePlayer);
 $('#pPlay').addEventListener('click', () => V.paused ? V.play() : V.pause());
 $('#pBig').addEventListener('click', () => V.play());

@@ -18,14 +18,58 @@ const artReady = new Set();   // rel des jaquettes deja decodees par le navigate
  * dans le HTML avec la classe d'apparition: changer d'onglet ne laisse plus voir
  * les initiales du fond pendant la frame ou l'image se rebranche.
  */
-function artTag(a){
+/* Par le partage, une affiche se demande reduite (400 px pour une vignette,
+   1280 pour une grande image de fond): le serveur en fait une copie legere.
+   Certaines pesaient 5 Mo pour 168 px affiches. En local, l'original. */
+function urlAffiche(url, taille){
+  if (!url || !taille || /^(blob|data|file):/.test(url) || !/^https?:$/.test(location.protocol)) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'mini=' + taille;
+}
+function artTag(a, grand){
   if (!a || !a.art) return '';
   const url = artUrls.get(a.art.rel);
   const ready = url && artReady.has(a.art.rel);
+  const taille = grand ? 1280 : 400;
+  const mini = urlAffiche(url, taille);
+  // deja chargee en entier une fois: directement la vraie
+  const src = affichesPleines.has(url) ? url : mini;
   // paresseuses: 134 affiches d'un coup pesaient 34 Mo au premier affichage sur telephone
-  return '<img data-art="' + esc(a.key) + '" alt="" loading="lazy" decoding="async"' +
-
-    (ready ? ' src="' + esc(url) + '" class="in" data-done="1"' : '') + '>';
+  return '<img data-art="' + esc(a.key) + '" data-mini="' + taille + '" alt="" loading="lazy" decoding="async"' +
+    (ready ? ' src="' + esc(src) + '" class="in" data-done="1"' + (src !== url ? ' data-pleine="' + esc(url) + '"' : '') : '') + '>';
+}
+/* D'abord la copie legere (le premier affichage arrive vite), puis la vraie
+ * affiche — mais seulement pour celles qu'on voit vraiment (a l'ecran ou
+ * juste a cote), deux a la fois, et seulement apres le premier chargement:
+ * sinon on retombait sur les 34 Mo d'un coup. La vraie est chargee a part
+ * avant d'etre posee, l'echange ne clignote pas. */
+const affichesPleines = new Set();          // url originales deja chargees en entier
+const fileAffiches = [];
+let affichesEnCours = 0, affichesPretes = false;
+const veilleAffiches = ('IntersectionObserver' in window) ? new IntersectionObserver((entrees) => {
+  for (const en of entrees){
+    if (!en.isIntersecting) continue;
+    veilleAffiches.unobserve(en.target);
+    fileAffiches.push(en.target);
+  }
+  pomperAffiches();
+}, { rootMargin: '300px' }) : null;
+function pomperAffiches(){
+  if (!affichesPretes) return;
+  while (affichesEnCours < 2 && fileAffiches.length){
+    const img = fileAffiches.shift(), pleine = img.dataset.pleine;
+    if (!pleine || !img.isConnected || affichesPleines.has(pleine) && img.src === pleine) continue;
+    affichesEnCours++;
+    const pre = new Image();
+    const fin = () => { affichesEnCours--; pomperAffiches(); };
+    pre.onload = () => { affichesPleines.add(pleine); if (img.isConnected) img.src = pleine; fin(); };
+    pre.onerror = fin;
+    pre.src = pleine;
+  }
+}
+function veillerAffiche(img){
+  if (!img.dataset.pleine || img.dataset.veille || !veilleAffiches) return;
+  img.dataset.veille = '1';
+  veilleAffiches.observe(img);
 }
 function paintArt(img, rel, url){
   img.addEventListener('load',  () => { artReady.add(rel); img.classList.add('in'); }, { once:true });
@@ -47,7 +91,15 @@ async function hydrate(){
       url = src.url;
       artUrls.set(a.art.rel, url);
     }
-    paintArt(img, a.art.rel, url);
+    const mini = urlAffiche(url, +img.dataset.mini || 0);
+    if (mini !== url && !affichesPleines.has(url)) img.dataset.pleine = url;
+    paintArt(img, a.art.rel, affichesPleines.has(url) ? url : mini);
+  }
+  // la vraie affiche, plus tard, pour celles qu'on voit
+  $$('img[data-pleine]').forEach(veillerAffiche);
+  if (!affichesPretes && !hydrate.premier){
+    hydrate.premier = true;
+    setTimeout(() => { affichesPretes = true; pomperAffiches(); }, 2500);
   }
   // vignettes d'épisodes (paresseux)
   thumbObserver && $$('[data-thumb]').forEach(el => { if (!el.dataset.obs){ el.dataset.obs = '1'; thumbObserver.observe(el); } });
