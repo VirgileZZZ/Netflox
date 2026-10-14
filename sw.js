@@ -8,8 +8,9 @@
  *  - les videos, l'index de la bibliotheque, les notes et les comptes ne sont
  *    jamais mis en cache: ils doivent etre frais, et pesent des gigaoctets.
  */
-const CACHE = 'netflox-v1';
-const COQUILLE = ['./', 'index.html', 'manifest.webmanifest', 'icones/netflox.svg', 'icones/netflox-192.png'];
+const CACHE = 'netflox-v2';
+const COQUILLE = ['./', 'index.html', 'manifest.webmanifest', 'icones/netflox.svg', 'icones/netflox-192.png',
+                  'icones/netflox-marque.svg', 'icones/netflox-ruban.svg'];
 
 self.addEventListener('install', (ev) => {
   ev.waitUntil(caches.open(CACHE).then(c => c.addAll(COQUILLE)).catch(() => {}));

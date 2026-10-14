@@ -27,9 +27,10 @@ button{cursor:pointer}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
 [hidden]{display:none !important}
 .top{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--bg2);position:sticky;top:0;z-index:5}
-.mark{width:28px;height:28px;border-radius:8px;background:var(--grad);display:grid;place-items:center}
-.top h1{font-size:1.05rem;font-weight:800;letter-spacing:-.03em}
-.top h1 b{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.top h1{font-size:1.05rem;font-weight:800;letter-spacing:-.03em;display:flex;align-items:baseline;gap:6px}
+.wordmark{font-size:1.2rem;letter-spacing:-.055em;white-space:nowrap}
+.wordmark img{height:.7em;width:auto;margin-left:.03em;vertical-align:baseline}
+.quoi{color:var(--muted);font-weight:600}
 .top .gap{flex:1}
 .lien{font-size:.82rem;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;border:1px solid var(--line2)}
 .lien:hover{color:var(--text)}
@@ -80,8 +81,7 @@ h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--dim
 </head>
 <body>
 <header class="top">
-  <span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.2" y="6.8" width="2.3" height="10.4" rx="1.15" fill="#fff" opacity=".6"/><path d="M9.6 7.4v9.2c0 .9 1 1.4 1.7.9l6.6-4.6c.6-.4.6-1.4 0-1.8l-6.6-4.6c-.7-.5-1.7 0-1.7.9z" fill="#fff"/></svg></span>
-  <h1>netflo<b>x</b> · Comptes de tes potes</h1>
+  <h1><span class="wordmark">netflo<img src="icones/netflox-ruban.svg" alt="x"></span> <span class="quoi">· Comptes de tes potes</span></h1>
   <div class="gap"></div>
   <a class="lien" href="index.html">← Bibliothèque</a>
 </header>
