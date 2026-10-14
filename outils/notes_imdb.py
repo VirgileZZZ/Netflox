@@ -507,6 +507,153 @@ def nouveaux_episodes(videos, series, plan, notes):
     return out
 
 
+# ------------------------------------------------- titres en anglais ------
+# IMDb donne parfois le titre japonais en lettres latines (« Moe yo Kyoken »)
+# tant que personne n'y a saisi l'anglais: toute la saison 3 de Mushoku Tensei
+# par exemple. TVmaze, lui, a l'anglais, et se cherche par l'identifiant IMDb.
+#
+# On ne remplace qu'un titre qui ressemble a du japonais romanise, et
+# seulement si la numerotation de TVmaze est la meme que la notre: les titres
+# deja en anglais de la serie doivent y retomber sur le meme episode. Un titre
+# anglais deja en place — y compris corrige a la main — n'est jamais touche.
+TVMAZE = "https://api.tvmaze.com"
+_VOYELLES = "aeiouāēīōūâêîôû"
+_SYLLABE = (r"(?:(?:ch|sh|ts|[kgsztdnhbpmrfjwy])y?)?[%s]+|n(?![%sy])|([kgsztdhbpmcfj])(?=\1)|[tc](?=ch)"
+            % (_VOYELLES, _VOYELLES))
+_MOT_ROMAJI = re.compile(r"(?:%s)+" % _SYLLABE)
+# des mots anglais qui s'ecrivent aussi en syllabes japonaises (« Takaoka Time »)
+_ANGLAIS = {"time", "home", "one", "hope", "name", "game", "side", "make", "take", "note", "more", "some",
+            "come", "ride", "tide", "here", "were", "are", "your", "may", "say", "day", "way", "mine", "save",
+            "rise", "fire", "wire", "hide", "bye", "hero", "demon", "sin", "pain", "future", "sage", "omen",
+            "arise", "ken"}
+# les petits mots d'une phrase anglaise: un seul, et le titre est anglais
+_LIAISONS = {"the", "of", "and", "with", "for", "is", "my", "your", "from", "this", "that", "an", "at",
+             "are", "it", "its", "his", "her", "their", "will", "was", "in", "on", "who", "what", "how"}
+_COURTS = {"a", "i", "no", "so", "to", "go", "me", "be", "he", "we", "do"}
+
+
+def _mots(texte):
+    return re.findall(r"[^\W\d_]+", str(texte).lower())
+
+
+def _romaji_morceau(texte):
+    """La plupart des mots en syllabes japonaises (un nom propre etranger,
+    « Quain », ou un mot anglais glisse, « Step », n'y change rien), aucun
+    petit mot de phrase anglaise, aucun mot anglais qui s'y deguise."""
+    mots = _mots(texte)
+    if not mots or any(m in _LIAISONS or m in _ANGLAIS for m in mots):
+        return False
+    if sum(bool(_MOT_ROMAJI.fullmatch(m)) for m in mots) < 0.7 * len(mots):
+        return False
+    return any(c in texte.lower() for c in "āēīōūâêîôû") or any(m not in _COURTS for m in mots)
+
+
+def romaji(titre):
+    """« Moe yo Kyōken » oui, « Life Back at Home » non. Un titre double
+    (« Kimi o Tsuredasu Riyû / Gorgeous Tiger Reloaded ») l'est des qu'une
+    de ses moities l'est."""
+    return any(_romaji_morceau(m) for m in str(titre).split("/"))
+
+
+def latin(titre):
+    """Rien que des lettres latines: TVmaze donne parfois les kanji."""
+    return all(unicodedata.name(c, "").startswith("LATIN") for c in str(titre) if c.isalpha())
+
+
+def anglais_sur(titre):
+    """Un titre qui ne peut etre qu'anglais: il porte un petit mot de phrase."""
+    return any(m in _LIAISONS for m in _mots(titre))
+
+
+def _tvmaze(chemin):
+    req = urllib.request.Request(TVMAZE + chemin, headers={"User-Agent": "netflox-notes/1.0"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def titres_tvmaze(tconst, cache):
+    """{"3.1": "Burn Bright, Mad Dog", ...}, garde trois jours. {} si TVmaze
+    ne connait pas la serie; None si le reseau n'a pas repondu."""
+    c = cache.get(tconst)
+    if c and time.time() - c.get("vu", 0) < 3 * 86400:
+        return c.get("eps", {})
+    try:
+        show = _tvmaze("/lookup/shows?imdb=" + tconst)
+        eps = _tvmaze("/shows/%d/episodes" % show["id"])
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            return None
+        eps = []
+    except Exception:
+        return None
+    out = {}
+    for e in eps:
+        if isinstance(e.get("season"), int) and isinstance(e.get("number"), int) and e.get("name"):
+            if not BOUCHE_TROU.match(e["name"]):
+                out["%d.%d" % (e["season"], e["number"])] = e["name"]
+    cache[tconst] = {"vu": time.time(), "eps": out}
+    return out
+
+
+def titres_anglais(videos, series, log):
+    """Remplace les titres romanises par l'anglais de TVmaze. Renvoie le nombre."""
+    fichier = os.path.join(CACHE, "tvmaze.json")
+    cache = lire_json(fichier, {})
+    total = 0
+    for dossier, fiche in sorted(series.items()):
+        sc_chemin = os.path.join(videos, dossier, ACCOMPAGNEMENT)
+        sc = lire_json(sc_chemin, None)
+        if not isinstance(sc, dict):
+            continue
+        noms = dict(sc.get("titres_episodes") or {})
+        a_traduire = [rel for rel, t in noms.items() if saison_episode(rel) and romaji(t) and not anglais_sur(t)]
+        if not a_traduire:
+            continue
+        en = titres_tvmaze(fiche["tconst"], cache)
+        if not en:
+            continue
+        # la meme numerotation: les titres deja anglais retombent au meme
+        # endroit. Saison par saison quand elle a de quoi juger, sinon sur
+        # toute la serie; un desaccord, et la saison (ou la serie) reste telle quelle.
+        # Ne temoignent que les titres surement anglais, ou deja identiques a
+        # TVmaze: un titre japonais que la regle n'a pas reconnu ne prouve rien.
+        def accord(temoins):
+            pareils = sum(normaliser(t) == normaliser(en["%d.%d" % saison_episode(rel)]) for rel, t in temoins)
+            return None if len(temoins) < 3 else pareils >= len(temoins) / 2
+        temoins = [(rel, t) for rel, t in noms.items()
+                   if saison_episode(rel) and not romaji(t) and "%d.%d" % saison_episode(rel) in en
+                   and (anglais_sur(t) or normaliser(t) == normaliser(en["%d.%d" % saison_episode(rel)]))]
+        serie_ok = accord(temoins)
+        refusees = set()
+        changes = 0
+        for rel in a_traduire:
+            saison = saison_episode(rel)[0]
+            ok = accord([x for x in temoins if saison_episode(x[0])[0] == saison])
+            if ok is None:
+                ok = serie_ok is not False
+            if not ok:
+                refusees.add(saison)
+                continue
+            anglais = en.get("%d.%d" % saison_episode(rel))
+            if anglais and latin(anglais) and not romaji(anglais) and anglais != noms[rel]:
+                noms[rel] = anglais
+                changes += 1
+        if changes:
+            sc["titres_episodes"] = {k: noms[k] for k in sorted(noms)}
+            ecrire_json(sc_chemin, sc)
+            log("titres anglais : %s (%d)" % (dossier, changes))
+            total += changes
+        # dit une fois, pas a chaque lancement
+        deja = set(cache.get("_refus", {}).get(dossier, []))
+        if refusees - deja:
+            log("titres anglais : %s, saison(s) %s numerotee(s) autrement sur TVmaze, laissee(s) telle(s) quelle(s)"
+                % (dossier, ", ".join(map(str, sorted(refusees)))))
+            cache.setdefault("_refus", {})[dossier] = sorted(refusees | deja)
+    if cache:
+        ecrire_json(fichier, cache)
+    return total
+
+
 def charger_titres(chemin, voulus):
     out = {}
     with gzip.open(chemin, "rt", encoding="utf-8") as f:
@@ -606,7 +753,7 @@ def maj(complet=False, log=print):
                 break
     if inconnus or lots:
         quoi = sorted(set(inconnus)) or sorted(lots)
-        log("a revoir : %s%s" % (", ".join(quoi[:4]), " ..." if len(quoi) > 4 else ""))
+        log("a revoir (%d) : %s%s" % (len(quoi), ", ".join(quoi[:4]), " ..." if len(quoi) > 4 else ""))
         chemin_eps = telecharger(EPISODES, log)
         if chemin_eps:
             parents = {f["tconst"] for f in series.values()}
@@ -658,6 +805,13 @@ def maj(complet=False, log=print):
             titres = charger_titres(chemin_noms, voulus)
 
     res = appliquer(videos, series, plan, notes, titres, log, bavard=complet)
+    # les titres qu'IMDb n'a qu'en japonais romanise: l'anglais de TVmaze
+    try:
+        anglais = titres_anglais(videos, series, log)
+    except Exception:
+        anglais = 0
+    if anglais:
+        res = (res[0], res[1], res[2] + anglais, res[3])
     if complet or noms_pris or lots:
         # 220 Mo qui ne resservent qu'a la prochaine serie inconnue: on les rend
         try:

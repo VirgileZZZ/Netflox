@@ -1385,8 +1385,7 @@ class Serveur(socketserver.ThreadingTCPServer):
         exc = sys.exc_info()[1]
         if isinstance(exc, (ConnectionError, TimeoutError, socket.timeout)):
             return
-        print(couleur("  (requete abandonnee: %s)" % exc.__class__.__name__,
-                      "90"))
+        print("\r\033[K      " + couleur("↳ requête abandonnée : %s" % exc.__class__.__name__, "90"))
 
 
 def port_libre(prefere=0, hote="127.0.0.1"):
@@ -1482,10 +1481,93 @@ def ouvrir_tunnel(exe, port, sur_lien):
                 vu = True
                 sur_lien(m.group(0))
             elif "ERR" in texte and not vu:
-                sys.stdout.write("   " + texte.strip()[-160:] + "\n")
+                sys.stdout.write("\r\033[K      " + couleur("↳ " + texte.strip()[-120:], "90") + "\n")
 
     threading.Thread(target=lire, daemon=True).start()
     return proc
+
+
+# ------------------------------------------------------------ affichage ----
+# Une ligne par etape, cochee quand elle est faite: « ✓  Index   85 907
+# fichiers · 0,4 s ». Pendant qu'elle travaille, la ligne montre ce qui se
+# passe (un telechargement IMDb), puis se reecrit avec le resultat.
+VERT, GRIS, JAUNE, ROUGE, CYAN, ROSE = "92", "90", "93", "91", "96", "95"
+_ANSI = re.compile(r"\033\[[0-9;]*m")
+_LARGEUR = 46
+
+
+def _ligne(signe, code, nom, texte, fin="\n"):
+    print("\r\033[K   " + couleur(signe, code) + "  " + couleur("%-12s" % nom, "1") + " " + texte,
+          end=fin, flush=True)
+
+
+def etape(nom, texte):
+    """Une etape en cours: reecrite par la suivante."""
+    _ligne("·", GRIS, nom, couleur(texte, GRIS), fin="")
+
+
+def faite(nom, texte, ok=True):
+    _ligne("✓" if ok else "!", VERT if ok else JAUNE, nom, texte)
+
+
+def detail(texte, code=GRIS):
+    print("      " + couleur("↳ ", GRIS) + couleur(texte, code))
+
+
+def milliers(n):
+    return "{:,}".format(n).replace(",", " ")
+
+
+def secondes(t):
+    return ("%.1f s" % t).replace(".", ",")
+
+
+# Le logo en blocs, dans le degrade de la page: du rose de l'accent au violet.
+_LOGO = {
+    "N": ["█▄  █", "█ █ █", "█  ▀█"],
+    "E": ["█▀▀▀", "█▀▀ ", "█▄▄▄"],
+    "T": ["▀█▀", " █ ", " █ "],
+    "F": ["█▀▀▀", "█▀▀ ", "█   "],
+    "L": ["█   ", "█   ", "█▄▄▄"],
+    "O": ["█▀▀█", "█  █", "█▄▄█"],
+    "X": ["▀▄ ▄▀", "  █  ", "▄▀ ▀▄"],
+}
+_ROSE, _VIOLET = (255, 77, 141), (124, 92, 255)
+
+
+def degrade(texte, debut=_ROSE, fin=_VIOLET, gras=True):
+    """Chaque colonne prend sa teinte entre les deux couleurs."""
+    n = max(1, len(texte) - 1)
+    out = ""
+    for k, c in enumerate(texte):
+        if c == " ":
+            out += c
+            continue
+        r, g, b = (round(debut[x] + (fin[x] - debut[x]) * k / n) for x in range(3))
+        out += "[%s38;2;%d;%d;%dm%s" % ("1;" if gras else "", r, g, b, c)
+    return out + "[0m"
+
+
+def entete():
+    lignes = ["  ".join(_LOGO[l][r] for l in "NETFLOX") for r in range(3)]
+    print()
+    for l in lignes:
+        print("   " + degrade(l))
+    print("   " + couleur("partage de la bibliothèque", GRIS))
+    print()
+
+
+def encadre(url, code):
+    """Le lien, bien visible: c'est la seule chose a copier."""
+    large = len(url) + 6
+    print()
+    print("      " + couleur("╭" + "─" * large + "╮", code))
+    print("      " + couleur("│", code) + "   " + couleur(url, "1;" + code) + "   " + couleur("│", code))
+    print("      " + couleur("╰" + "─" * large + "╯", code))
+
+
+def info(nom, texte, code=GRIS):
+    print("      " + couleur("%-15s" % nom, GRIS) + couleur(texte, code))
 
 
 def copier(texte):
@@ -1497,19 +1579,50 @@ def copier(texte):
         return False
 
 
+def copie_annoncee(url):
+    if copier(url):
+        print("      " + couleur("✓ copié dans le presse-papier", VERT))
+    else:
+        print("      " + couleur("copie ce lien pour le partager", GRIS))
+
+
 # ----------------------------------------------------------------- mode ----
+def _cartes(cartes):
+    """Les choix en cartes, cote a cote si la fenetre est assez large."""
+    large = 32
+    blocs = []
+    for num, nom, code, rgb, lignes in cartes:
+        teinte = "38;2;%d;%d;%d" % rgb
+        haut = couleur("╭" + "─" * large + "╮", teinte)
+        tete = (couleur("│", teinte) + "  " + couleur(" %s " % num, "1;30;48;2;%d;%d;%d" % rgb) + "  " +
+                couleur(nom.ljust(large - 7), "1") + couleur("│", teinte))
+        corps = [couleur("│", teinte) + "  " + couleur(t.ljust(large - 2), GRIS) + couleur("│", teinte) for t in lignes]
+        vide = couleur("│", teinte) + " " * large + couleur("│", teinte)
+        bas = couleur("╰" + "─" * large + "╯", teinte)
+        blocs.append([haut, tete, vide] + corps + [bas])
+    try:
+        colonnes = shutil.get_terminal_size((100, 30)).columns
+    except Exception:
+        colonnes = 100
+    if colonnes >= 2 * (large + 2) + 8:
+        for ligne in zip(*blocs):
+            print("   " + "  ".join(ligne))
+    else:
+        for b in blocs:
+            for ligne in b:
+                print("   " + ligne)
+
+
 def demander_mode():
     """Deux usages bien differents, on laisse choisir plutot que deviner."""
-    print(couleur("  Comment veux-tu partager ?", "1"))
+    print("   " + couleur("Comment veux-tu partager ?", "1"))
     print()
-    print("    " + couleur("1", "96") + "  Local     " +
-          couleur("sur ta box uniquement, rien ne sort de chez toi", "90"))
-    print("    " + couleur("2", "96") + "  Internet  " +
-          couleur("lien public temporaire, accessible de partout", "90"))
+    _cartes([("1", "Local", CYAN, (97, 214, 214), ["Sur ta box uniquement :", "rien ne sort de chez toi."]),
+             ("2", "Internet", ROSE, (255, 77, 141), ["Un lien public temporaire,", "accessible de partout."])])
     print()
     while True:
         try:
-            rep = input("  Ton choix [1] : ").strip().lower()
+            rep = input("   " + degrade("›", gras=True) + " Ton choix " + couleur("(1 par défaut)", GRIS) + " : ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             return None
@@ -1517,7 +1630,7 @@ def demander_mode():
             return "local"
         if rep in ("2", "i", "internet", "en ligne", "ligne"):
             return "internet"
-        print(couleur("  Tape 1 ou 2.", "90"))
+        print("   " + couleur("Tape 1 ou 2.", GRIS))
 
 
 def mode_demande():
@@ -1539,34 +1652,67 @@ def rafraichir_notes():
     telecharge que si IMDb a publie depuis la veille — un lancement ordinaire
     ne coute rien. Et s'il echoue, on continue sans lui: un partage ne doit pas
     dependre de la sante d'un site tiers.
+
+    Ce que le module raconte en route (fichiers recuperes, series revues) ne
+    fait que passer sur la ligne de l'etape; ce qui demande un oeil — une serie
+    reconnue, une autre a identifier a la main — reste affiche dessous.
     """
     try:
         import notes_imdb
     except Exception:
         return
-    print("  Notes IMDb des episodes...")
+    gardes, revues = [], [0]
+
+    def log(m):
+        m = _ANSI.sub("", m).strip()
+        r = re.match(r"a revoir \((\d+)\)", m)
+        if r:
+            revues[0] = int(r.group(1))
+            etape("Notes IMDb", "vérifie les épisodes de %d série(s)…" % revues[0])
+        elif re.match(r"title\.\w+\.tsv\.gz : ", m):
+            nom, quoi = m.split(" : ", 1)
+            etape("Notes IMDb", "%s : %s…" % (nom.split(".")[1], quoi.replace("recuperes", "récupérés")))
+        else:
+            m = re.sub(r"\s{2,}", " · ", m)
+            for brut, joli in (("nouvelle(s) serie(s) :", "nouvelle(s) série(s) :"),
+                               ("identifiee :", "reconnue :"),
+                               ("a la main :", "à identifier à la main :"),
+                               ("dossier disparu, fiche oubliee :", "dossier disparu, fiche oubliée :")):
+                if m.startswith(brut):
+                    m = joli + m[len(brut):]
+            gardes.append(m)
+            etape("Notes IMDb", m[:60])
+
+    etape("Notes IMDb", "vérification…")
     try:
-        res = notes_imdb.maj(log=lambda m: print("  " + m))
+        res = notes_imdb.maj(log=log)
     except Exception as e:
-        print("        " + couleur("indisponible (%s)" % e, "93"))
+        faite("Notes IMDb", couleur("indisponibles (%s)" % e, JAUNE), ok=False)
         return
     if not res:
-        return
-    ajout, _laissees, titres, _ = res
-    if ajout or titres:
-        print("        " + couleur("%d note(s), %d titre(s) ajoutes"
-                                   % (ajout, titres), "92"))
+        faite("Notes IMDb", couleur("indisponibles pour l'instant", JAUNE), ok=False)
     else:
-        print("        " + couleur("deja a jour", "90"))
+        ajout, _laissees, titres, _ = res
+        if ajout or titres:
+            texte = couleur("%d note(s) et %d titre(s) ajoutés" % (ajout, titres), VERT)
+        else:
+            texte = "à jour"
+        if revues[0]:
+            texte += couleur(" · %d série(s) revérifiée(s)" % revues[0], GRIS)
+        faite("Notes IMDb", texte)
+    for m in gardes:
+        a_voir = m.startswith(("à identifier", "illisible", "aucune serie"))
+        detail(m, JAUNE if a_voir else GRIS)
 
 
 # ----------------------------------------------------------------- main ----
 def main():
     os.system("")                               # active les couleurs sur la console Windows
-    print()
-    print(couleur("  Partage de la bibliotheque", "1;95"))
-    print("  " + "-" * 42)
-    print()
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    entete()
 
     mode = mode_demande() or demander_mode()
     if mode is None:
@@ -1574,24 +1720,28 @@ def main():
     print()
 
     rafraichir_notes()
-    print()
 
-    total = 2 if mode == "local" else 3
-    print("  1/%d  Index des fichiers..." % total, end=" ", flush=True)
+    etape("Index", "liste les fichiers…")
     debut = time.time()
     chemin, nb = construire_index()
-    threading.Thread(target=reindexer_en_continu, daemon=True).start()
-    sauves = sauvegarder_au_lancement()
     if chemin is None:
-        print(couleur("aucun dossier videos/ trouve", "91"))
+        faite("Index", couleur("aucun dossier videos/ trouvé", ROUGE), ok=False)
         return 1
-    print(couleur("%d fichiers" % nb, "92") + " en %.1fs" % (time.time() - debut))
-    print("       " + couleur("%d fiches et comptes sauvegardes dans %s/" % (sauves, SAUVEGARDES), "90"))
-
+    faite("Index", "%s fichiers" % milliers(nb) + couleur(" · " + secondes(time.time() - debut), GRIS))
+    threading.Thread(target=reindexer_en_continu, daemon=True).start()
+    etape("Sauvegarde", "copie des fiches et des comptes…")
+    sauves = sauvegarder_au_lancement()
+    faite("Sauvegarde", "%d fiches et comptes" % sauves + couleur(" → %s/" % SAUVEGARDES, GRIS))
 
     if mode == "local":
         return partage_local()
     return partage_internet()
+
+
+def fin_d_ecran():
+    print()
+    print("   " + couleur("─" * _LARGEUR, GRIS))
+    print("   " + couleur("●", VERT) + " Partage en cours" + couleur("  ·  Ctrl+C pour arrêter", GRIS))
 
 
 def partage_local():
@@ -1601,17 +1751,16 @@ def partage_local():
     serveur = Serveur(("0.0.0.0", port), Handler)
     threading.Thread(target=serveur.serve_forever, daemon=True).start()
     url = "http://%s:%d" % (adresse_locale(), port)
-    print("  2/2  Serveur pret sur ton reseau.")
+    faite("Serveur", "prêt sur ton réseau " + couleur("(box uniquement)", GRIS))
+    encadre(url, CYAN)
+    copie_annoncee(url)
     print()
-    print("  " + couleur("  " + url + "  ", "1;30;106"))
+    info("Où l'ouvrir", "téléphone, télé, PC… sur la même box")
+    info("Sur ce PC", "http://127.0.0.1:%d" % port)
+    info("Comptes", "http://127.0.0.1:%d/comptes.html" % port)
     print()
-    print("  " + couleur("Copie dans le presse-papier." if copier(url) else
-                         "Copie ce lien pour le partager.", "90"))
-    print("  " + couleur("A ouvrir depuis un appareil connecte a la meme box.", "90"))
-    print("  " + couleur("Sur cette machine : http://127.0.0.1:%d" % port, "90"))
-    print("  " + couleur("Comptes de tes potes : http://127.0.0.1:%d/comptes.html" % port, "90"))
-    print("  " + couleur("Si Windows demande d'autoriser Python, accepte (reseau prive).", "93"))
-    print()
+    print("      " + couleur("! Si Windows demande d'autoriser Python, accepte (réseau privé).", JAUNE))
+    fin_d_ecran()
     attendre(serveur, None)
     return 0
 
@@ -1621,40 +1770,42 @@ def partage_internet():
     port = port_libre(hote="127.0.0.1")
     serveur = Serveur(("127.0.0.1", port), Handler)
     threading.Thread(target=serveur.serve_forever, daemon=True).start()
-    print("  2/3  Serveur local sur " + couleur("http://127.0.0.1:%d" % port, "96"))
-    print("       " + couleur("Comptes de tes potes : http://127.0.0.1:%d/comptes.html" % port, "90"))
-
+    faite("Serveur", "http://127.0.0.1:%d" % port + couleur(" · sur ce PC", GRIS))
 
     exe = trouver_cloudflared()
     if not exe:
-        print(couleur("  3/3  cloudflared introuvable.", "91"))
-        print("       Pose cloudflared.exe dans le dossier outils/, ou installe-le")
-        print("       avec : winget install --id Cloudflare.cloudflared")
+        faite("Tunnel", couleur("cloudflared introuvable", ROUGE), ok=False)
+        detail("pose cloudflared.exe dans outils/, ou installe-le :")
+        detail("winget install --id Cloudflare.cloudflared", CYAN)
         print()
-        print("  La bibliotheque reste accessible ici meme : " +
-              couleur("http://127.0.0.1:%d" % port, "96"))
+        info("Sur ce PC", "http://127.0.0.1:%d" % port)
+        info("Comptes", "http://127.0.0.1:%d/comptes.html" % port)
+        fin_d_ecran()
         attendre(serveur, None)
         return 0
 
-    print("  3/3  Ouverture du tunnel...", end=" ", flush=True)
+    etape("Tunnel", "ouverture du lien public…")
     pret = threading.Event()
+    liens = [0]
 
     def sur_lien(url):
-        print(couleur("en ligne", "92"))
+        liens[0] += 1
+        faite("Tunnel", couleur("en ligne", VERT) +
+              (couleur(" · nouveau lien, renvoie-le à tes potes", JAUNE) if liens[0] > 1 else ""))
+        encadre(url, ROSE)
+        copie_annoncee(url)
         print()
-        print("  " + couleur("  " + url + "  ", "1;30;105"))
-        print()
-        print("  " + couleur("Copie dans le presse-papier." if copier(url) else
-                             "Copie ce lien pour le partager.", "90"))
-        print("  " + couleur("Toute personne ayant ce lien voit la bibliotheque entiere.", "93"))
-        print("  " + couleur("Le lien meurt a la fermeture de cette fenetre.", "90"))
-        print()
+        info("Qui le voit", "toute personne ayant ce lien, bibliothèque entière", JAUNE)
+        info("Durée", "le lien meurt à la fermeture de cette fenêtre")
+        info("Comptes", "http://127.0.0.1:%d/comptes.html" % port)
+        fin_d_ecran()
         pret.set()
 
     proc = ouvrir_tunnel(exe, port, sur_lien)
     if not pret.wait(45):
-        print(couleur("pas de reponse", "91"))
-        print("  Verifie ta connexion: le tunnel sera retente tout seul.")
+        faite("Tunnel", couleur("pas de réponse", ROUGE) + couleur(" · nouvel essai tout seul", GRIS), ok=False)
+        detail("vérifie ta connexion internet")
+        fin_d_ecran()
     attendre(serveur, proc, lambda: ouvrir_tunnel(exe, port, sur_lien))
     return 0
 
@@ -1663,30 +1814,30 @@ def attendre(serveur, proc, relancer=None):
     """Jusqu'a Ctrl+C. Si le tunnel tombe (coupure, mise en veille), on le
     rouvre: le serveur, lui, n'a pas bouge, et le nouveau lien s'affiche et
     se copie comme le premier. On abandonne apres 5 echecs d'affilee."""
-    print(couleur("  Ctrl+C pour arreter le partage.", "90"))
     essais, stable_depuis = 0, time.time()
     try:
         while True:
             if proc is not None and proc.poll() is not None:
                 if relancer is None or essais >= 5:
-                    print(couleur("\n  Le tunnel s'est ferme.", "91"))
+                    print()
+                    faite("Tunnel", couleur("fermé", ROUGE), ok=False)
                     break
                 if time.time() - stable_depuis > 600:
                     essais = 0                       # il avait tenu: on repart de zero
                 essais += 1
                 attente = min(60, 5 * 2 ** (essais - 1))
-                print(couleur("\n  Le tunnel s'est ferme : nouvel essai dans %d s (%d/5)..." % (attente, essais), "93"))
+                print()
+                faite("Tunnel", couleur("coupé · nouvel essai dans %d s (%d/5)" % (attente, essais), JAUNE), ok=False)
                 time.sleep(attente)
-                print("  Reouverture du tunnel...", end=" ", flush=True)
+                etape("Tunnel", "réouverture…")
                 proc = relancer()
                 stable_depuis = time.time()
-                print(couleur("  (le lien change: renvoie le nouveau a tes potes)", "90"))
                 continue
             time.sleep(0.5)
     except KeyboardInterrupt:
         print()
 
-    print("  Fermeture...")
+    etape("Arrêt", "fermeture…")
     if proc is not None:
         try:
             proc.terminate()
@@ -1697,7 +1848,7 @@ def attendre(serveur, proc, relancer=None):
         os.remove(os.path.join(RACINE, MANIFESTE))
     except OSError:
         pass
-    print(couleur("  Partage arrete.", "90"))
+    faite("Arrêt", couleur("partage arrêté", GRIS))
 
 
 if __name__ == "__main__":
