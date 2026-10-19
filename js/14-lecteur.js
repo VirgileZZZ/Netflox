@@ -863,17 +863,46 @@ function getSeg(ep, k){
   if (S.shared) return (k === 'fin' ? S.host.outro : S.host.intro)[ep.rel] || null;
   return store.get(segKey(ep, k), null);
 }
+/* Sur un lien de partage, l'hote — sa machine, ou un compte declare comme le
+   sien — pose ses reperes comme chez lui: le serveur les ecrit dans le
+   bibliotheque.json de la serie (/__generique). Les invites n'ont que le
+   choix de passer automatiquement. */
+function peutReperer(){ return !S.shared || S.estHote; }
+function courtDe(ep){ return ep.rel.slice(ep.anime.length + 1); }
+async function envoyerReperes(k, serie, segs){
+  let d = null;
+  try {
+    const r = await fetch('__generique', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                           body: JSON.stringify({ genre: k, serie, segs }) });
+    d = await r.json();
+  } catch(e){}
+  if (!d || !d.ok) toast('Repère non enregistré : ' + ((d && d.erreur) || 'le partage ne répond pas'), 'bad');
+}
 function setSeg(k, patch){
-  if (!S.current || lectureSeule()) return;
-  const cur = store.get(segKey(S.current, k), null) || {};
-  store.set(segKey(S.current, k), Object.assign({}, cur, patch));
-  saveSidecar(S.current.anime);
+  if (!S.current || !peutReperer()) return;
+  if (S.shared){
+    // un repere a moitie pose (le debut seul) attend sa fin ici: seul un repere
+    // complet part sur le disque, comme dans le fichier ecrit par la page
+    const t = k === 'fin' ? S.host.outro : S.host.intro;
+    const seg = Object.assign({}, t[S.current.rel] || {}, patch);
+    t[S.current.rel] = seg;
+    if (segReady(seg)) envoyerReperes(k, S.current.anime, { [courtDe(S.current)]: { start: seg.start, end: seg.end } });
+  } else {
+    const cur = store.get(segKey(S.current, k), null) || {};
+    store.set(segKey(S.current, k), Object.assign({}, cur, patch));
+    saveSidecar(S.current.anime);
+  }
   paintSegZones(); buildIntroMenu(); poke();
 }
 function clearSeg(k){
-  if (!S.current || lectureSeule()) return;
-  store.del(segKey(S.current, k));
-  saveSidecar(S.current.anime);
+  if (!S.current || !peutReperer()) return;
+  if (S.shared){
+    delete (k === 'fin' ? S.host.outro : S.host.intro)[S.current.rel];
+    envoyerReperes(k, S.current.anime, { [courtDe(S.current)]: null });
+  } else {
+    store.del(segKey(S.current, k));
+    saveSidecar(S.current.anime);
+  }
   hideSkip(); paintSegZones(); buildIntroMenu();
 }
 function segReady(seg){
@@ -893,16 +922,21 @@ function paintSegZones(){
 /** Recopie un repère sur tous les épisodes de la même saison. */
 function spreadSeg(k){
   const seg = getSeg(S.current, k);
-  if (!segReady(seg) || !S.current || lectureSeule()) return;
+  if (!segReady(seg) || !S.current || !peutReperer()) return;
   const a = S.byKey.get(S.current.anime);
   if (!a) return;
   let n = 0;
+  const envoi = {};
   for (const e of a.episodes){
     if (e.seasonKey !== S.current.seasonKey || e.rel === S.current.rel) continue;
-    store.set(segKey(e, k), { start: seg.start, end: seg.end });
+    if (S.shared){
+      (k === 'fin' ? S.host.outro : S.host.intro)[e.rel] = { start: seg.start, end: seg.end };
+      envoi[courtDe(e)] = { start: seg.start, end: seg.end };
+    } else store.set(segKey(e, k), { start: seg.start, end: seg.end });
     n++;
   }
-  saveSidecar(S.current.anime);
+  if (S.shared){ if (n) envoyerReperes(k, a.key, envoi); }
+  else saveSidecar(S.current.anime);
   toast(n ? 'Repère appliqué à ' + fmtCount(n, 'autre épisode', 'autres épisodes') : 'Aucun autre épisode dans la saison', 'ok');
   buildIntroMenu();
 }
@@ -911,28 +945,27 @@ function buildIntroMenu(){
     const seg = getSeg(S.current, k) || {};
     const auto = store.get(SEGS[k].auto, false);
     const line = (label, val) => label + '<b>' + (val != null ? fmtTime(val) : '—') + '</b>';
+    const passer = '<button data-seg="' + k + ':auto" class="' + (auto ? 'on' : '') + '">Passer automatiquement<b>' +
+      (auto ? 'oui' : 'non') + '</b></button>';
+    // l'invite: le seul choix qui le regarde, passer ou non
+    if (!peutReperer()) return '<h4>' + SEGS[k].titre + '</h4>' + passer;
     return '<h4>' + SEGS[k].titre + '</h4>' +
-      (S.shared
-        ? '<button disabled>' + line('Début ', seg.start) + '</button>' +
-          '<button disabled>' + line('Fin ', seg.end) + '</button>'
-        : '<button data-seg="' + k + ':start">' + line('Marquer le début ', seg.start) + '</button>' +
-          '<button data-seg="' + k + ':end">' + line('Marquer la fin ', seg.end) + '</button>' +
-          (segReady(seg) ? '<button data-seg="' + k + ':spread">Appliquer à la saison</button>' : '')) +
-      '<button data-seg="' + k + ':auto" class="' + (auto ? 'on' : '') + '">Passer automatiquement<b>' +
-        (auto ? 'oui' : 'non') + '</b></button>' +
-      (!S.shared && (seg.start != null || seg.end != null)
-        ? '<button data-seg="' + k + ':clear">Effacer les repères</button>' : '');
+      '<button data-seg="' + k + ':start">' + line('Marquer le début ', seg.start) + '</button>' +
+      '<button data-seg="' + k + ':end">' + line('Marquer la fin ', seg.end) + '</button>' +
+      (segReady(seg) ? '<button data-seg="' + k + ':spread">Appliquer à la saison</button>' : '') +
+      passer +
+      (seg.start != null || seg.end != null ? '<button data-seg="' + k + ':clear">Effacer les repères</button>' : '');
   };
   const note = 'font-weight:400;text-transform:none;letter-spacing:0;line-height:1.4;padding-bottom:8px';
   $('#introMenu').innerHTML =
     bloc('intro') + '<div class="msep"></div>' + bloc('fin') +
-    '<h4 style="' + note + '">' +
+    (!peutReperer() ? '' :
+    '<h4 style="' + note + '">Place-toi au bon moment, puis clique.<br>' +
       (S.shared
-        ? 'Repères posés par l’hôte de la bibliothèque. Le choix de passer automatiquement, lui, est le tien.'
-        : 'Place-toi au bon moment, puis clique.<br>' +
-          (S.canWrite
-            ? 'Enregistré dans <b style="font-weight:600">' + SIDECAR + '</b>, dans le dossier de la série.'
-            : 'Enregistré dans ce navigateur seulement.')) + '</h4>';
+        ? 'Enregistré dans <b style="font-weight:600">' + SIDECAR + '</b>, sur la machine de l’hôte.'
+        : S.canWrite
+          ? 'Enregistré dans <b style="font-weight:600">' + SIDECAR + '</b>, dans le dossier de la série.'
+          : 'Enregistré dans ce navigateur seulement.') + '</h4>');
   $$('[data-seg]', $('#introMenu')).forEach(b => b.addEventListener('click', () => {
     const [k, quoi] = b.dataset.seg.split(':');
     if (quoi === 'start')       setSeg(k, { start: V.currentTime });

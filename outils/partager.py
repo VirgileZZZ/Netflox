@@ -533,6 +533,69 @@ def noter(d, hote):
     return True, ""
 
 
+REPERES = {"intro": "generiques", "fin": "generiques_fin"}
+
+
+def _nombre(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf")
+
+
+def reperer(d):
+    """Pose ou retire des reperes de generique, au nom de l'hote, dans le
+    bibliotheque.json de la serie — la ou la page ouverte sur le dossier les
+    range: « generiques » pour le debut, « generiques_fin » pour la fin, par
+    chemin d'episode sous la serie. d = {"genre": "intro" | "fin", "serie": "...",
+    "segs": {"saison1/x_1.mp4": {"start": s, "end": e} ou null pour retirer}}.
+    Plusieurs episodes d'un coup: « appliquer a la saison ». Renvoie (ok, raison)."""
+    champ = REPERES.get(d.get("genre"))
+    serie, segs = d.get("serie"), d.get("segs")
+    if not champ:
+        return False, "genre"
+    # « C: » ou « .. »: une serie ne sort jamais du dossier des videos
+    if not isinstance(serie, str) or not serie or serie in (".", "..") or any(c in serie for c in "/\\:"):
+        return False, "serie"
+    base = _base_media()
+    dossier = os.path.join(base, serie) if base else None
+    if not dossier or not os.path.isdir(dossier):
+        return False, "serie inconnue"
+    if not isinstance(segs, dict) or not 1 <= len(segs) <= 1000:
+        return False, "reperes"
+    propres = {}
+    for court, seg in segs.items():
+        morceaux = court.split("/") if isinstance(court, str) else []
+        if not morceaux or any(m in ("", ".", "..") or ":" in m or "\\" in m for m in morceaux):
+            return False, "episode"
+        ext = court.rsplit(".", 1)[-1].lower() if "." in morceaux[-1] else ""
+        if ext not in VIDEO_EXT or not os.path.isfile(os.path.join(dossier, *morceaux)):
+            return False, "episode inconnu"
+        if seg is None:
+            propres[court] = None
+            continue
+        a, b = (seg.get("start"), seg.get("end")) if isinstance(seg, dict) else (None, None)
+        if not (_nombre(a) and _nombre(b) and 0 <= a < b <= 86400):
+            return False, "repere"
+        propres[court] = {"start": round(a, 2), "end": round(b, 2)}
+
+    with _verrou_notes:
+        fichier = os.path.join(dossier, ACCOMPAGNEMENT)
+        try:
+            data = _lire_pour_ecrire(fichier, {"version": 1, "serie": serie})
+        except FichierAbime:
+            return False, "fiche de la serie illisible: rien n'est ecrit"
+        t = data.get(champ) if isinstance(data.get(champ), dict) else {}
+        for court, seg in propres.items():
+            if seg is None:
+                t.pop(court, None)
+            else:
+                t[court] = seg
+        if t:
+            data[champ] = t
+        else:
+            data.pop(champ, None)
+        _ecrire(fichier, data)
+    return True, ""
+
+
 # ----------------------------------------------------------- les comptes ---
 """Un compte leger pour les invites: un pseudo et un mot de passe, rien d'autre.
 
@@ -1154,7 +1217,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         chemin = self._chemin()
-        if chemin != "/__noter" and not chemin.startswith("/__compte/") and not chemin.startswith("/__admin/"):
+        if chemin not in ("/__noter", "/__generique") and not chemin.startswith("/__compte/") and not chemin.startswith("/__admin/"):
             self.close_connection = True          # le corps n'est pas lu: la connexion ne sert plus
             self.send_error(404)
             return
@@ -1163,7 +1226,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if origine and urllib.parse.urlsplit(origine).netloc != (self.headers.get("Host") or ""):
             self.close_connection = True
             return self._json({"ok": False, "erreur": "origine refusee"}, 403)
-        limite = 4 * 1024 * 1024 if chemin in ("/__compte/sauver", "/__compte/inscription") else 4096
+        limite = (4 * 1024 * 1024 if chemin in ("/__compte/sauver", "/__compte/inscription")
+                  else 128 * 1024 if chemin == "/__generique" else 4096)   # une saison entiere de reperes
         try:
             n = int(self.headers.get("Content-Length") or 0)
             if n < 0 or n > limite:
@@ -1186,6 +1250,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._json(admin(chemin[len("/__admin/"):], d))
             except Exception as e:
                 return self._json({"ok": False, "erreur": "erreur: %s" % e}, 500)
+        if chemin == "/__generique":
+            # les reperes de generique sont ceux de l'hote: sa machine, ou son compte
+            if not est_hote(self):
+                return self._json({"ok": False, "erreur": "reserve a l'hote"}, 403)
+            try:
+                ok, raison = reperer(d)
+            except OSError:
+                ok, raison = False, "ecriture impossible"
+            return self._json({"ok": ok, "erreur": raison}, 200 if ok else 400)
         hote = est_hote(self)
         try:
             ok, raison = noter(d, hote)
