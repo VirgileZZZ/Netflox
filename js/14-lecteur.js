@@ -296,11 +296,11 @@ async function poserSousTitres(ep){
 V.textTracks.addEventListener('change', appliquerSousTitres);
 V.textTracks.addEventListener('addtrack', () => setTimeout(appliquerSousTitres, 0));
 let hideT, saveT, nextT, nextCount = 0;
-/* L'episode dont on a refuse la suite (« Annuler » sur la carte): la carte ne
-   revient plus pour lui — elle reapparaissait au timeupdate suivant — et la
+/* La suite refusee (« Annuler » sur la carte) pour l'episode en cours: la
+   carte ne revient plus — elle reapparaissait au timeupdate suivant — et la
    fin de l'episode ne lance plus le suivant toute seule. N ou le bouton
    « episode suivant » le lancent toujours. Oublie a l'ouverture d'un episode. */
-let nextRefuse = null;
+let suiteRefusee = false;
 
 async function openPlayer(ep){
   const a = S.byKey.get(ep.anime);
@@ -313,7 +313,7 @@ async function openPlayer(ep){
   $('#pErr').hidden = true;
   $('#pTitle').textContent = (a ? a.title : ep.anime);
   $('#pSub').textContent = [seasonLabel(ep.seasonKey), ep.title, fmtSize(ep.size)].filter(Boolean).join(' · ');
-  nextRefuse = null;
+  suiteRefusee = false;
   hideNext();
   hideSkip();
   segInside = { intro:false, fin:false };
@@ -722,9 +722,13 @@ document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement) try { screen.orientation.unlock(); } catch(e){}
 });
 
-V.addEventListener('play',  () => { $('#pPlay').innerHTML = ICON_PAUSE; $('#pPlay').dataset.tip = 'Pause (K)'; showCenter(false); P.classList.add('jouant'); poke(); });
+V.addEventListener('play',  () => {
+  $('#pPlay').innerHTML = ICON_PAUSE; $('#pPlay').dataset.tip = 'Pause (K)'; showCenter(false); P.classList.add('jouant'); poke();
+  if (carteSuivante()) nextLancer();          // le compte a rebours repart avec la video
+});
 V.addEventListener('pause', () => {
   $('#pPlay').innerHTML = ICON_PLAY; $('#pPlay').dataset.tip = 'Lecture (K)'; showCenter(true); P.classList.remove('hide-ui', 'jouant'); clearTimeout(hideT);
+  clearTimeout(nextT);                        // en pause, la carte attend: rien ne part tout seul
   saveNow(); flushProgress();                 // moment calme: on pose la progression sur le disque
 });
 V.addEventListener('timeupdate', () => {
@@ -732,7 +736,11 @@ V.addEventListener('timeupdate', () => {
   checkSegs();
   if (!saveT) saveT = setTimeout(() => { saveT = null; saveNow(); }, 4000);
   const d = V.duration;
-  if (d && d - V.currentTime < 22 && d > 120) showNext();
+  if (!d || d <= 120) return;
+  if (d - V.currentTime < 22) showNext();
+  // revenu en arriere, hors de la fin: la carte s'en va (sans valoir refus) et
+  // le compte a rebours avec elle — il lancait la suite au milieu du revisionnage
+  else if (carteSuivante()) hideNext();
 });
 V.addEventListener('progress', paintScrub);
 V.addEventListener('loadedmetadata', () => {
@@ -741,7 +749,7 @@ V.addEventListener('loadedmetadata', () => {
 });
 V.addEventListener('ended', () => {
   saveNow(); flushProgress();
-  if (S.current && nextRefuse === S.current.rel) return;   // la suite a ete refusee: on s'arrete la
+  if (suiteRefusee) return;                   // la suite a ete refusee: on s'arrete la
   playNext(false);
 });
 V.addEventListener('error', () => {
@@ -1010,7 +1018,10 @@ function showSkip(k){
   const b = $('#skipIntro');
   $('#skipLabel').textContent = 'Passer ' + SEGS[k].quoi;
   b.hidden = false;
-  requestAnimationFrame(() => b.classList.add('on'));
+  // a l'image suivante seulement s'il est toujours voulu: la carte « episode
+  // suivant », arrivee entre-temps, l'a peut-etre deja retire (hideSkip); il
+  // revenait alors par-dessus elle et prenait le clic de « Annuler »
+  requestAnimationFrame(() => { if (skipKind === k) b.classList.add('on'); });
   clearTimeout(skipT);
   // 3 secondes réelles: setTimeout ignore la vitesse de lecture
   skipT = setTimeout(hideSkip, 3000);
@@ -1056,7 +1067,7 @@ function nextEpisode(){
 }
 function showNext(){
   const n = nextEpisode();
-  if (!n || $('#nextCard').classList.contains('on') || (S.current && nextRefuse === S.current.rel)) return;
+  if (!n || carteSuivante() || suiteRefusee) return;
   hideSkip();                                    // la carte prend le relais
   const a = S.byKey.get(n.anime);
   $('#nName').textContent = (a ? a.title + ' · ' : '') + titreEpisode(n);
@@ -1068,14 +1079,19 @@ function showNext(){
   nextCount = 10;
   $('#nRing').textContent = nextCount;
   $('#nextCard').classList.add('on');
+  if (!V.paused) nextLancer();
+}
+function carteSuivante(){ return $('#nextCard').classList.contains('on'); }
+/* Le compte a rebours avance d'une seconde a la fois, et seulement quand la
+   video joue: la pause le fige (voir 'pause' / 'play'). */
+function nextLancer(){
   clearTimeout(nextT);
-  const tick = () => {
+  nextT = setTimeout(() => {
     nextCount--;
     $('#nRing').textContent = nextCount;
     if (nextCount <= 0) playNext(true);
-    else nextT = setTimeout(tick, 1000);
-  };
-  nextT = setTimeout(tick, 1000);
+    else nextLancer();
+  }, 1000);
 }
 function hideNext(){ clearTimeout(nextT); $('#nextCard').classList.remove('on'); }
 /* Quitter un episode dans sa fin le compte comme vu: le generique de fin
@@ -1110,9 +1126,15 @@ function playNext(force){
 $('#nGo').addEventListener('click', (ev) => { ev.currentTarget.blur(); playNext(true); });
 $('#nNo').addEventListener('click', (ev) => {
   ev.currentTarget.blur();
-  if (!$('#nextCard').classList.contains('on')) return;   // deja partie: le refus viserait l'episode suivant
-  nextRefuse = S.current ? S.current.rel : null;
+  if (!carteSuivante()) return;               // deja partie: le refus viserait l'episode suivant
+  suiteRefusee = true;
   hideNext();
+  // la carte avait pris la place de « Passer le generique »: en plein dedans,
+  // il revient (une scene apres le generique, on veut pouvoir la rejoindre)
+  for (const k of SEG_KINDS){
+    const seg = getSeg(S.current, k);
+    if (segReady(seg) && V.currentTime >= seg.start && V.currentTime < seg.end - 0.3){ showSkip(k); break; }
+  }
 });
 
 /* --------------------------------------------------- raccourcis ----- */
