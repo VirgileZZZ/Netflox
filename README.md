@@ -61,6 +61,7 @@ videos/
 | `Convertir-Video.bat` | Convertit n'importe quelle vidéo en MP4 lisible par le navigateur (ou en MKV pour archiver). Glisser-déposer des fichiers ou des dossiers dessus. |
 | `download-all-seasons.bat` | Télécharge toutes les saisons d'un anime depuis une URL du catalogue Anime-Sama, une fenêtre par saison. |
 | `main.py` | Le téléchargeur en ligne de commande (`python main.py --help`). |
+| `outils/dedoublonner_sous_titres.py` | Repère les répliques affichées deux fois en même temps dans les `.vtt` (`--corriger` pour les fusionner ; les originaux vont dans `sauvegardes-sous-titres/`). Une phrase redite juste après n'est pas touchée. |
 | `outils/notes_imdb.py` | Remplit les notes IMDb des épisodes (`--complet` pour les nouvelles séries et les titres). |
 
 Pour le téléchargeur : `pip install -r requirements.txt`, et `ffmpeg` pour convertir les `.ts` en `.mp4`.
