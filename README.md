@@ -14,6 +14,8 @@ Ma bibliothèque de séries et d'animes, à regarder dans le navigateur comme su
 
 Ouvrir `index.html` dans Chrome (ou Edge / Opera), puis choisir le dossier `videos/`. Le navigateur s'en souvient pour les fois suivantes.
 
+Ou l'app **Netflox** (menu Démarrer) : la même page dans sa propre fenêtre, sans serveur ni partage. Le dossier `videos/` se choisit une fois, puis se rouvre tout seul ; RTX Video Super Resolution est allumée d'office ; au premier lancement elle reprend ce qu'Opera gardait (edits vus, favoris…). Elle est d'office sur le compte de l'hôte (celui coché « compte de l'hôte » dans `comptes.html`) : ce qu'on y regarde part dans ce compte, et ce qu'il a appris sur un lien de partage revient dans l'app (`--compte <pseudo>` pour en prendre un autre). `F11` plein écran, `F5` recharger, `F12` outils de développement. Pour la refaire après une modification de `app/` : `cd app`, `npm install`, `npm run build` → `app/dist/win-unpacked/Netflox.exe`. Ce qui change dans `index.html` et `js/` y arrive sans rien refaire.
+
 ### Regarder depuis un autre appareil
 
 Double-cliquer sur `partager.bat` (il faut Python) :

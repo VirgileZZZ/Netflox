@@ -1,0 +1,41 @@
+{
+  "name": "netflox",
+  "productName": "Netflox",
+  "version": "1.0.0",
+  "description": "Netflox sur ce PC: la bibliotheque dans sa propre fenetre, sans serveur ni partage",
+  "main": "main.js",
+  "private": true,
+  "author": "VirgileZZZ",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win dir"
+  },
+  "dependencies": {
+    "classic-level": "3.0.0"
+  },
+  "devDependencies": {
+    "electron": "44.7.2",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "fr.virgilezzz.netflox",
+    "productName": "Netflox",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "win": {
+      "target": "dir",
+      "icon": "../icones/netflox-512.png",
+      "signAndEditExecutable": true
+    },
+    "electronLanguages": [
+      "fr",
+      "en-US"
+    ]
+  }
+}

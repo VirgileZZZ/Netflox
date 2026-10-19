@@ -29,7 +29,13 @@ const COMPTE_CLES = new Set(['edvus', 'edstats', 'inviteId', 'sublang', 'subpos'
 function cleDuCompte(k){ return COMPTE_PREFIXES.test(k) || COMPTE_CLES.has(k); }
 
 const COMPTE = { dispo: false, actif: false, pseudo: '', sale: false, minuteur: 0, onglet: 'connexion',
-                 machine: false, hote: false };   // la machine de l'hote; un compte declare comme le sien
+                 machine: false, hote: false,     // la machine de l'hote; un compte declare comme le sien
+                 appli: false };                  // dans l'app Netflox: le compte de l'hote, sans serveur
+
+/* L'app Netflox (app/) n'a pas de serveur: elle lit et ecrit elle-meme le
+   fichier du compte de l'hote, et le passe a la page par window.netfloxApp.
+   Ailleurs (navigateur, lien de partage) il n'existe pas: rien ne change. */
+const APPLI = (window.netfloxApp && window.netfloxApp.compte) || null;
 
 /* Toute ecriture d'une cle du compte le marque a sauver. Pas a chaque fois:
    la lecture pose sa position toutes les 4 secondes. Au plus une sauvegarde
@@ -51,6 +57,8 @@ function compteInstantane(){
 async function compteSauver(enPartant){
   if (!COMPTE.actif || !COMPTE.sale) return;
   COMPTE.sale = false;
+  // l'app ecrit sur le disque de son cote: l'envoi part meme si la page s'en va
+  if (COMPTE.appli){ APPLI.sauver(compteInstantane()); return; }
   const corps = JSON.stringify({ donnees: compteInstantane() });
   // en quittant la page, fetch serait coupe: sendBeacon part quand meme, cookie compris
   if (enPartant && navigator.sendBeacon){
@@ -155,6 +163,14 @@ function paintCompte(){
 }
 function remplirCompte(msg){
   const p = $('#comptePanel');
+  if (COMPTE.appli){
+    p.innerHTML =
+      '<h4>Compte : <b>' + esc(COMPTE.pseudo) + '</b></h4>' +
+      '<p class="cp-aide">Dans l’app, ce que tu regardes est enregistré dans ce compte : ' +
+      'progression, edits vus, réglages. Tu les retrouves en te connectant sur un lien de partage, ' +
+      'et ce que tu y regardes revient ici.</p>';
+    return;
+  }
   if (COMPTE.actif){
     p.innerHTML =
       '<h4>Connecté : <b>' + esc(COMPTE.pseudo) + '</b></h4>' +
@@ -266,3 +282,29 @@ $('#comptePanel').addEventListener('submit', async (ev) => {
   toast(ins
  ? 'Compte créé : bienvenue ' + r.pseudo : 'Content de te revoir, ' + r.pseudo, 'ok');
 });
+
+/* ------------------------------------------------- dans l'app ------- */
+/* Le compte de l'hote est celui de l'app, d'office: sa progression, ses
+   edits vus et ses reglages y arrivent au demarrage, et ce qu'on fait ici y
+   repart. Ce que l'app savait en plus (repris d'Opera) le rejoint aussi. */
+function compteAppli(){
+  const c = APPLI.lire(false);
+  if (!c) return;
+  COMPTE.appli = COMPTE.dispo = COMPTE.actif = true;
+  COMPTE.pseudo = c.pseudo;
+  COMPTE.hote = !!c.hote;
+  compteFusionner(c.donnees);
+  COMPTE.sale = true;
+  compteSauver();
+  paintCompte();
+}
+/* Regarde sur le telephone pendant que l'app reste ouverte: en revenant sur
+   la fenetre, ce que le compte a appris d'ailleurs la rejoint. */
+addEventListener('visibilitychange', () => {
+  if (!COMPTE.appli || document.hidden) return;
+  const c = APPLI.lire(true);                    // null si rien n'a bouge depuis
+  if (!c) return;
+  compteFusionner(c.donnees);
+  if (S.animes.length) render();
+});
+if (APPLI) compteAppli();
