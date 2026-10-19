@@ -1105,8 +1105,15 @@ function playNext(force){
 
   openPlayer(n);
 }
-$('#nGo').addEventListener('click', () => playNext(true));
-$('#nNo').addEventListener('click', () => { nextRefuse = S.current ? S.current.rel : null; hideNext(); });
+// le bouton clique rend le focus: carte cachee, il restait focalise, et la
+// barre d'espace suivante le recliquait au lieu de mettre en pause
+$('#nGo').addEventListener('click', (ev) => { ev.currentTarget.blur(); playNext(true); });
+$('#nNo').addEventListener('click', (ev) => {
+  ev.currentTarget.blur();
+  if (!$('#nextCard').classList.contains('on')) return;   // deja partie: le refus viserait l'episode suivant
+  nextRefuse = S.current ? S.current.rel : null;
+  hideNext();
+});
 
 /* --------------------------------------------------- raccourcis ----- */
 addEventListener('keydown', (ev) => {
