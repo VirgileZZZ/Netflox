@@ -296,6 +296,11 @@ async function poserSousTitres(ep){
 V.textTracks.addEventListener('change', appliquerSousTitres);
 V.textTracks.addEventListener('addtrack', () => setTimeout(appliquerSousTitres, 0));
 let hideT, saveT, nextT, nextCount = 0;
+/* L'episode dont on a refuse la suite (« Annuler » sur la carte): la carte ne
+   revient plus pour lui — elle reapparaissait au timeupdate suivant — et la
+   fin de l'episode ne lance plus le suivant toute seule. N ou le bouton
+   « episode suivant » le lancent toujours. Oublie a l'ouverture d'un episode. */
+let nextRefuse = null;
 
 async function openPlayer(ep){
   const a = S.byKey.get(ep.anime);
@@ -308,6 +313,7 @@ async function openPlayer(ep){
   $('#pErr').hidden = true;
   $('#pTitle').textContent = (a ? a.title : ep.anime);
   $('#pSub').textContent = [seasonLabel(ep.seasonKey), ep.title, fmtSize(ep.size)].filter(Boolean).join(' · ');
+  nextRefuse = null;
   hideNext();
   hideSkip();
   segInside = { intro:false, fin:false };
@@ -733,7 +739,11 @@ V.addEventListener('loadedmetadata', () => {
   $('#tAll').textContent = fmtTime(V.duration);
   paintScrub(); paintSegZones();
 });
-V.addEventListener('ended', () => { saveNow(); flushProgress(); playNext(false); });
+V.addEventListener('ended', () => {
+  saveNow(); flushProgress();
+  if (S.current && nextRefuse === S.current.rel) return;   // la suite a ete refusee: on s'arrete la
+  playNext(false);
+});
 V.addEventListener('error', () => {
   if (P.hidden || S.switching || !S.current) return;
   if (S.replier){                 // l'adresse directe n'a pas pris: on reprend par le blob:
@@ -1046,7 +1056,7 @@ function nextEpisode(){
 }
 function showNext(){
   const n = nextEpisode();
-  if (!n || $('#nextCard').classList.contains('on')) return;
+  if (!n || $('#nextCard').classList.contains('on') || (S.current && nextRefuse === S.current.rel)) return;
   hideSkip();                                    // la carte prend le relais
   const a = S.byKey.get(n.anime);
   $('#nName').textContent = (a ? a.title + ' · ' : '') + titreEpisode(n);
@@ -1096,7 +1106,7 @@ function playNext(force){
   openPlayer(n);
 }
 $('#nGo').addEventListener('click', () => playNext(true));
-$('#nNo').addEventListener('click', hideNext);
+$('#nNo').addEventListener('click', () => { nextRefuse = S.current ? S.current.rel : null; hideNext(); });
 
 /* --------------------------------------------------- raccourcis ----- */
 addEventListener('keydown', (ev) => {
