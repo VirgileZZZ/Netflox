@@ -27,6 +27,8 @@ Ceux qui l'ouvrent peuvent noter les épisodes et, s'ils le veulent, créer un c
 
 Sur téléphone, Netflox s'installe comme une application (« Ajouter à l'écran d'accueil »).
 
+L'adresse suit ce qui est ouvert, sur le lien comme dans `index.html` ouvert directement : `#/mushoku-tensei` (la fiche), `#/mushoku-tensei/saison1/3` (l'épisode), `#/edits`, `#/edits/mushoku-tensei`, `#/series`, `#/recherche/…`. Collée ailleurs ou après `F5`, elle rouvre le même endroit.
+
 Pendant le partage, un épisode ajouté dans `videos/` apparaît sans relancer (l'index est refait toutes les 3 minutes). À chaque lancement, les fiches des séries, les notes des invités et les comptes sont copiés dans `sauvegardes-auto/` (les 15 dernières sont gardées).
 
 

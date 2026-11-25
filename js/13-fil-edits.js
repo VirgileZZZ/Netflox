@@ -544,6 +544,7 @@ function openEdits(key, depart){
   if (!a || !a.edits.length) return toast('Aucun edit dans cette série', 'bad');
   edSpoilsVisibles = false;
   edOuvrir(a.edits, a.title, depart, null, true);
+  edCtx.serie = key;                       // pour l'adresse: #/edits/la-serie
 }
 /** Le fil de la bibliothèque entière: chaque edit annonce son œuvre en haut. */
 function openEditsTous(depart){
@@ -699,6 +700,7 @@ function openEditsEpisode(rel, depuisRel){
   edSpoilsVisibles = true;
   edOuvrir(l, (a ? a.title + ' · ' : '') + nomCourtEpisode(ep), 0, depuisRel || null, false);
   edCtx.episode = true;
+  edCtx.epRel = rel;
   $('#edSpoil').hidden = true;
 }
 

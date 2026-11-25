@@ -295,7 +295,7 @@ function recharger(){ vider().finally(() => fenetre && fenetre.webContents.reloa
    l'app le fait — avec le geste utilisateur qu'il faut a la permission. */
 async function rouvrirDossier(){
   const wc = fenetre.webContents;
-  if (!/\/index\.html$/i.test(wc.getURL())) return;
+  if (!/\/index\.html$/i.test(wc.getURL().split('#')[0])) return;   // F5 sur #/une-serie aussi
   for (let k = 0; k < 40; k++){
     let r = 'attente';
     try {
